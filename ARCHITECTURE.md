@@ -124,10 +124,10 @@ The cleaner is **token-unaware** — it does not track whether `//` or `/*` appe
 
 ## File Handle Management
 
-1. `util.SniffBinary()` opens a file and reads the first 8KB to detect binary content
-2. If text, the open file (positioned past the sniff prefix) is stored in `sniffedFile.file`
-3. `renderFile()` uses `io.MultiReader(bytes.NewReader(sniff), sf.file)` to prepend the sniff prefix and resume from the correct byte position
-4. Both `sf.file.Close()` (via defer in renderFile) and the cleanup loop in `app.Run` close files
+1. `util.SniffBinary()` briefly opens the file, reads up to 8KB to detect binary content or null bytes, and immediately closes it to prevent file descriptor leaks.
+2. If text, the file path is added to a processing queue.
+3. Later, `renderFile()` opens the file from scratch, streams it through the cleaner (comment stripper), and defers the close.
+4. This ensures only a controlled number of files (bounded by the `--concurrency` setting) are ever held open simultaneously.
 
 ## Testing Strategy
 

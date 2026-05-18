@@ -22,7 +22,7 @@ $ dumper --path ./myproject --output ./dump_out
 
 ```bash
 git clone https://github.com/user-for-download/go-dumper.git
-cd dumper
+cd go-dumper
 go build -o dumper ./cmd/dumper
 ```
 
