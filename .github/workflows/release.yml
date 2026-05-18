@@ -1,0 +1,170 @@
+name: Build Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GO_VERSION_FILE: go.mod
+  BINARY_NAME: dumper
+  MAIN_PACKAGE: ./cmd/dumper
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────
+  # Tests
+  # ─────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+
+      - name: Check formatting
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # ─────────────────────────────────────
+  # Build release binaries
+  # Runs for tag pushes and manual dispatch
+  # ─────────────────────────────────────
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-x64
+            ext: ""
+
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+            ext: ""
+
+          - goos: windows
+            goarch: amd64
+            suffix: windows-x64
+            ext: ".exe"
+
+          - goos: darwin
+            goarch: amd64
+            suffix: macos-x64
+            ext: ""
+
+          - goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          OUTPUT="dist/${BINARY_NAME}-${{ matrix.suffix }}${{ matrix.ext }}"
+
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${{ steps.version.outputs.version }}" \
+            -o "$OUTPUT" \
+            "${MAIN_PACKAGE}"
+
+          chmod +x "$OUTPUT" || true
+
+          cd dist
+          sha256sum "${BINARY_NAME}-${{ matrix.suffix }}${{ matrix.ext }}" \
+            > "${BINARY_NAME}-${{ matrix.suffix }}${{ matrix.ext }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.suffix }}
+          path: |
+            dist/${{ env.BINARY_NAME }}-${{ matrix.suffix }}${{ matrix.ext }}
+            dist/${{ env.BINARY_NAME }}-${{ matrix.suffix }}${{ matrix.ext }}.sha256
+
+  # ─────────────────────────────────────
+  # Create GitHub Release
+  # Only on tag push
+  # ─────────────────────────────────────
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
