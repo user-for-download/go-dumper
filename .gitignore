@@ -18,7 +18,7 @@ coverage.*
 *.coverprofile
 profile.cov
 dump_out/
-dumper
+/dumper
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
