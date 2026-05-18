@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/yourname/dumper/internal/chunker"
-	"github.com/yourname/dumper/internal/cleaner"
-	"github.com/yourname/dumper/internal/format"
-	"github.com/yourname/dumper/internal/progress"
-	"github.com/yourname/dumper/internal/stats"
+	"github.com/user-for-download/go-dumper/internal/chunker"
+	"github.com/user-for-download/go-dumper/internal/cleaner"
+	"github.com/user-for-download/go-dumper/internal/format"
+	"github.com/user-for-download/go-dumper/internal/progress"
+	"github.com/user-for-download/go-dumper/internal/stats"
 )
 
 type job struct {

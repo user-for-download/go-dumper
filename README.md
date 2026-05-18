@@ -21,7 +21,7 @@ $ dumper --path ./myproject --output ./dump_out
 ## Installation
 
 ```bash
-git clone https://github.com/yourname/dumper.git
+git clone https://github.com/user-for-download/go-dumper.git
 cd dumper
 go build -o dumper ./cmd/dumper
 ```

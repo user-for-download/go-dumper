@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/yourname/dumper/internal/config"
+	"github.com/user-for-download/go-dumper/internal/config"
 )
 
 func readAllChunks(t *testing.T, dir string) (names []string, all string) {

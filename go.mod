@@ -1,4 +1,4 @@
-module github.com/yourname/dumper
+module github.com/user-for-download/go-dumper
 
 go 1.26
 

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yourname/dumper/internal/cleaner"
-	"github.com/yourname/dumper/internal/format"
-	"github.com/yourname/dumper/internal/util"
+	"github.com/user-for-download/go-dumper/internal/cleaner"
+	"github.com/user-for-download/go-dumper/internal/format"
+	"github.com/user-for-download/go-dumper/internal/util"
 )
 
 type EffectiveExcludesFunc func(root, output string, excludes []string, excludeSelf bool) []string

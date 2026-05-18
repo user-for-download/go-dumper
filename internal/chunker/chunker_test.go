@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/yourname/dumper/internal/util"
+	"github.com/user-for-download/go-dumper/internal/util"
 )
 
 func newTestChunker(t *testing.T, max int) (*Chunker, string) {

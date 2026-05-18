@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourname/dumper/internal/chunker"
-	"github.com/yourname/dumper/internal/cleaner"
-	"github.com/yourname/dumper/internal/config"
-	"github.com/yourname/dumper/internal/format"
-	"github.com/yourname/dumper/internal/progress"
-	"github.com/yourname/dumper/internal/stats"
-	"github.com/yourname/dumper/internal/tree"
-	"github.com/yourname/dumper/internal/util"
-	"github.com/yourname/dumper/internal/walker"
+	"github.com/user-for-download/go-dumper/internal/chunker"
+	"github.com/user-for-download/go-dumper/internal/cleaner"
+	"github.com/user-for-download/go-dumper/internal/config"
+	"github.com/user-for-download/go-dumper/internal/format"
+	"github.com/user-for-download/go-dumper/internal/progress"
+	"github.com/user-for-download/go-dumper/internal/stats"
+	"github.com/user-for-download/go-dumper/internal/tree"
+	"github.com/user-for-download/go-dumper/internal/util"
+	"github.com/user-for-download/go-dumper/internal/walker"
 )
 
 func Run(cfg *config.Config) (*stats.Stats, error) {

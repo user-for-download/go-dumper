@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/yourname/dumper/internal/util"
+	"github.com/user-for-download/go-dumper/internal/util"
 )
 
 type Options struct {
