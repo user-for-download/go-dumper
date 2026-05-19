@@ -50,9 +50,9 @@ func main() {
 		verbose bool
 
 		fPath, fOutput, fChunkPrefix, fClearMode, fStatsFile, fFormat, fTreeMode, fType string
-		fInclude, fExclude                                                       []string
-		fMaxSymbols, fTreeDepth, fConcurrency                                    int
-		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean  bool
+		fInclude, fExclude                                                              []string
+		fMaxSymbols, fTreeDepth, fConcurrency                                           int
+		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean          bool
 	)
 
 	rootCmd := &cobra.Command{
