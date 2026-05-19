@@ -17,6 +17,18 @@ import (
 
 func Run(cfg *config.Config) (*stats.Stats, error) {
 	st := stats.New()
+	finished := false
+	defer func() {
+		if !finished {
+			st.Finish(0)
+		}
+	}()
+
+	if cfg.Clean {
+		if err := os.RemoveAll(cfg.Output); err != nil {
+			return st, fmt.Errorf("clean output: %w", err)
+		}
+	}
 
 	includes, err := walker.ExpandPatterns(cfg.Include)
 	if err != nil {
@@ -34,6 +46,7 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		Root:          cfg.Path,
 		Includes:      includes,
 		Excludes:      excludes,
+		Type:          cfg.Type,
 		IncludeHidden: cfg.IncludeHidden,
 	})
 	if err != nil {
@@ -104,6 +117,7 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 			Mode:          treeMode,
 			Includes:      includes,
 			Excludes:      excludes,
+			Type:          cfg.Type,
 		})
 		if terr != nil {
 			st.AddError("tree: " + terr.Error())
@@ -147,6 +161,7 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	}
 
 	st.Finish(ch.ChunkCount())
+	finished = true
 	if cfg.StatsFile != "" {
 		if err := st.WriteJSON(cfg.StatsFile); err != nil {
 			return st, fmt.Errorf("stats: %w", err)

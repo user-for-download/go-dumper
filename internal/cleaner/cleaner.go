@@ -70,6 +70,10 @@ func stripLine(line string, r langRules, inBlock bool) (string, bool) {
 		line = line[:len(line)-1]
 	}
 
+	if inBlock && strings.TrimSpace(line) == "" {
+		return "", true
+	}
+
 	trimmed := strings.TrimSpace(line)
 
 	var out strings.Builder

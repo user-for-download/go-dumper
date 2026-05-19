@@ -68,7 +68,7 @@ func (c *Chunker) WriteString(s string) error {
 }
 
 func (c *Chunker) WriteBytes(b []byte, runes int) error {
-	if len(b) == 0 && runes == 0 {
+	if len(b) == 0 || runes == 0 {
 		return nil
 	}
 	c.mu.Lock()

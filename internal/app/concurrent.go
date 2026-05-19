@@ -55,9 +55,13 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 					r.render = rendered
 				}
 				select {
-				case <-ctx.Done():
-					return
 				case results <- r:
+				case <-ctx.Done():
+					select {
+					case results <- r:
+					default:
+					}
+					return
 				}
 			}
 		}()
@@ -112,6 +116,9 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 	}
 	if writeErr != nil {
 		cancel()
+		for i := next; i < len(files); i++ {
+			rep.FinishFile()
+		}
 		return writeErr
 	}
 	return nil

@@ -37,12 +37,6 @@ func SniffBinary(path string) (isBinary bool, err error) {
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	if err != nil {
-		return false, err
-	}
-	isExecutable := info.Mode()&0o111 != 0
-
 	buf := make([]byte, SniffSize)
 	n, rerr := io.ReadFull(f, buf)
 	if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
@@ -54,10 +48,6 @@ func SniffBinary(path string) (isBinary bool, err error) {
 		if bytes.HasPrefix(buf, magic) {
 			return true, nil
 		}
-	}
-
-	if isExecutable && !bytes.HasPrefix(buf, []byte("#!")) && len(buf) > 0 {
-		return true, nil
 	}
 
 	if bytes.IndexByte(buf, 0x00) >= 0 {

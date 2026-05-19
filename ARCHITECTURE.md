@@ -5,17 +5,17 @@ This document describes the internal structure of `dumper`.
 ## Package Overview
 
 ```
-cmd/dumper/           CLI entry point
-internal/app/         Orchestration: pipeline wiring
-internal/config/       Config loading, defaults, CLI overrides, validation
+cmd/dumper/            CLI entry point
+internal/app/          Orchestration: pipeline wiring
+internal/config/        Config loading, defaults, CLI overrides, validation
 internal/walker/       Filesystem traversal with glob filtering
-internal/chunker/     Rune-aware output file splitting
-internal/cleaner/     Language-aware comment stripping
-internal/format/      Output formatters (plain, markdown, xml)
-internal/tree/        ASCII project tree generation
-internal/util/        Binary file detection
-internal/stats/       Thread-safe counters + JSON export
-internal/progress/    mpb-based progress bar
+internal/chunker/      Rune-aware output file splitting
+internal/cleaner/      Language-aware comment stripping
+internal/format/       Output formatters (plain, markdown, xml)
+internal/tree/         ASCII project tree generation
+internal/util/         Binary file detection
+internal/stats/        Thread-safe counters + JSON export
+internal/progress/     mpb-based progress bar
 ```
 
 ## Data Flow
@@ -68,6 +68,23 @@ Three automatic exclusions are applied:
 2. **Dumper binary** — `autoExcludeSelf()` uses `os.Executable()` to find the running binary and adds it to excludes if it's under the scan root.
 3. **Effective excludes** — Both are combined in `app.EffectiveExcludes()` which is used by both `app.Run()` and `--dry-run`.
 
+### Include Priority Over Exclude
+
+When both `--include` and `--exclude` patterns match a file, the include pattern may win if it's more specific. The walker uses pattern specificity scoring:
+
+- Explicit file paths (no wildcards) always win over any exclude pattern
+- Otherwise, patterns with more literal characters (non-wildcard) win over patterns with more wildcards
+
+This allows `include: ["deploy/.env.example"]` to work even when `exclude: ["deploy/**"]` is present.
+
+### Type Filter
+
+The `--type` flag filters files by extension. When set (e.g., `--type go`), only files with that exact extension are included. The filter is applied in both the walker and tree generation for consistency.
+
+### Clean Output Folder
+
+The `--clean` flag removes the output directory before writing. This is useful for ensuring a fresh start without manual cleanup.
+
 ### Config Validation
 
 `Config.Validate()` enforces invariants after loading and merging:
@@ -84,10 +101,10 @@ Three automatic exclusions are applied:
 
 ### Tree Include Mode
 
-When `tree.mode: "include"`, the tree generation uses the same include/exclude patterns as the walker:
+When `tree.mode: "include"`, the tree generation uses the same include/exclude patterns and Type filter as the walker:
 
 1. `walker.ExpandPatterns()` expands `@file` patterns
-2. A `collectAllowed()` pass walks the filesystem and builds a `map[string]struct{}` of slash-relative paths that pass the filters
+2. A `collectAllowed()` pass walks the filesystem and builds a `map[string]struct{}` of slash-relative paths that pass the filters, including the Type filter
 3. `writeChildren()` skips any file not in the allowed set, and skips any directory that has no allowed descendants (`hasAllowedDescendant()`)
 4. Result: the tree shows exactly the files that will be dumped
 
@@ -102,6 +119,7 @@ The cleaner (`stripLine()`) is a single-pass state machine per line. It handles:
 - Line comments (`//`, `#`, `--`, etc.) — truncated
 - Block comments (`/* */`, `<!-- -->`) — removed, with mid-line close + code-after handling
 - Multi-line block comment spans
+- Blank lines inside block comments — suppressed (not leaked to output)
 
 The cleaner is **token-unaware** — it does not track whether `//` or `/*` appears inside a string literal. This is documented and acceptable for a dumper tool. Future work: integrate language-specific parsers (e.g., `go/scanner` for Go) for `--clear-mode=ast`.
 
@@ -113,6 +131,14 @@ The cleaner is **token-unaware** — it does not track whether `//` or `/*` appe
 - `xmlFmt` — `<file path="..."><![CDATA[...]]></file>`
 
 `format.New()` validates the format name and returns an error for unknown values.
+
+### Stats Handling
+
+Stats are initialized with `stats.New()` at the start of `app.Run()`. A deferred function ensures `st.Finish(0)` is called on any early error path, preventing garbage values from `DurationSec()`. On successful completion, `st.Finish(ch.ChunkCount())` is called with a boolean flag to prevent the defer from overwriting the duration.
+
+### Progress Bar Handling
+
+In concurrent mode, when a write error occurs, the worker pool is cancelled. The remaining unprocessed files may never send results (they exit via `ctx.Done()`). After the error, `RunConcurrent` drains the remaining file count by calling `rep.FinishFile()` for each unprocessed file, ensuring the progress bar completes correctly.
 
 ## Concurrency Model
 
@@ -138,6 +164,7 @@ The cleaner is **token-unaware** — it does not track whether `//` or `/*` appe
 ## Known Limitations
 
 1. **Cleaner is token-unaware** — may corrupt strings containing `//` or `/*`
-2. **No deduplication** — identical files (by path) could appear twice if the filesystem presents them twice (symlink cycles are detected but not content deduplication)
+2. **No deduplication** — identical files (by path) could appear twice if the filesystem presents them twice
 3. **Tree generation is not concurrency-safe with walker errors** — tree independently re-walks the filesystem; if files change between walks, tree and content may disagree
 4. **`Concurrency > 1` is not byte-for-byte reproducible** — parallel reads have non-deterministic timing; use `--concurrency 1` for reproducible output
+5. **No symlink cycle detection** — `filepath.WalkDir` does not follow symlinks; cycles via symlinks are not detected

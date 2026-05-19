@@ -18,6 +18,7 @@ type Options struct {
 	Root          string
 	Includes      []string
 	Excludes      []string
+	Type          string
 	IncludeHidden bool
 }
 
@@ -60,7 +61,6 @@ func (w *Walker) Collect() ([]Entry, error) {
 		absRoot = root
 	}
 
-	visitedDirs := make(map[string]bool)
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			w.errors = append(w.errors, walkErr)
@@ -79,11 +79,6 @@ func (w *Walker) Collect() ([]Entry, error) {
 			return nil
 		}
 		if d.IsDir() {
-			absPath, _ := filepath.Abs(path)
-			if visitedDirs[absPath] {
-				return filepath.SkipDir
-			}
-			visitedDirs[absPath] = true
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
@@ -95,8 +90,14 @@ func (w *Walker) Collect() ([]Entry, error) {
 		if !w.matchAny(w.opts.Includes, rel) {
 			return nil
 		}
-		if w.matchAny(w.opts.Excludes, rel) {
+		if w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel) {
 			return nil
+		}
+		if w.opts.Type != "" {
+			ext := filepath.Ext(name)
+			if ext == "" || strings.TrimPrefix(ext, ".") != w.opts.Type {
+				return nil
+			}
 		}
 		info, err := d.Info()
 		size := int64(0)
@@ -128,4 +129,61 @@ func (w *Walker) matchAny(patterns []string, rel string) bool {
 		}
 	}
 	return false
+}
+
+func (w *Walker) matchIncludePriority(includes, excludes []string, rel string) bool {
+	matchedInclude := w.matchAny(includes, rel)
+	matchedExclude := w.matchAny(excludes, rel)
+
+	if !matchedInclude {
+		return matchedExclude
+	}
+
+	if !matchedExclude {
+		return false
+	}
+
+	return !w.anyIncludeMoreSpecificThanExclude(includes, excludes, rel)
+}
+
+func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, rel string) bool {
+	for _, inc := range includes {
+		if inc == "" {
+			continue
+		}
+		ok, err := doublestar.PathMatch(inc, rel)
+		if err != nil || !ok {
+			continue
+		}
+		if !hasWildcard(inc) {
+			return true
+		}
+		for _, exc := range excludes {
+			if exc == "" {
+				continue
+			}
+			ok2, err2 := doublestar.PathMatch(exc, rel)
+			if err2 != nil || !ok2 {
+				continue
+			}
+			if patternSpecificity(inc) > patternSpecificity(exc) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasWildcard(p string) bool {
+	return strings.Contains(p, "*") || strings.Contains(p, "?")
+}
+
+func patternSpecificity(p string) int {
+	literals := 0
+	for _, c := range p {
+		if c != '*' && c != '?' {
+			literals++
+		}
+	}
+	return literals
 }

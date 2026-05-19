@@ -26,6 +26,7 @@ type Options struct {
 	Mode     Mode
 	Includes []string
 	Excludes []string
+	Type     string
 }
 
 func (o *Options) mode() Mode {
@@ -94,6 +95,12 @@ func collectAllowed(opts Options) (map[string]struct{}, error) {
 		}
 		if matchAny(opts.Excludes, rel) {
 			return nil
+		}
+		if opts.Type != "" {
+			ext := strings.TrimPrefix(filepath.Ext(name), ".")
+			if ext != opts.Type {
+				return nil
+			}
 		}
 		set[rel] = struct{}{}
 		return nil
