@@ -51,8 +51,8 @@ func main() {
 
 		fPath, fOutput, fChunkPrefix, fClearMode, fStatsFile, fFormat, fTreeMode string
 		fInclude, fExclude, fType                                                []string
-		fMaxSymbols, fTreeDepth, fConcurrency                                           int
-		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean          bool
+		fMaxSymbols, fTreeDepth, fConcurrency                                    int
+		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean   bool
 	)
 
 	rootCmd := &cobra.Command{

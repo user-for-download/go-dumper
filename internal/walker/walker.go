@@ -84,7 +84,7 @@ func (w *Walker) Collect() ([]Entry, error) {
 		if d.IsDir() {
 			return nil
 		}
-		
+
 		rel, relErr := filepath.Rel(absRoot, absPath)
 		if relErr != nil {
 			rel = path
@@ -147,15 +147,15 @@ func (w *Walker) Collect() ([]Entry, error) {
 			if err != nil || info.IsDir() {
 				continue
 			}
-			
+
 			// We intentionally skip the IncludeHidden check here so explicitly named hidden files are allowed.
-			
+
 			rel, relErr := filepath.Rel(absRoot, absMatch)
 			if relErr != nil {
 				rel = match
 			}
 			rel = filepath.ToSlash(rel)
-			
+
 			if !w.matchAny(w.opts.Includes, rel) {
 				continue
 			}
