@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"path/filepath"
 	"sync"
 
 	"github.com/user-for-download/go-dumper/internal/chunker"
@@ -9,6 +12,7 @@ import (
 	"github.com/user-for-download/go-dumper/internal/format"
 	"github.com/user-for-download/go-dumper/internal/progress"
 	"github.com/user-for-download/go-dumper/internal/stats"
+	"github.com/user-for-download/go-dumper/internal/util"
 )
 
 type job struct {
@@ -20,6 +24,7 @@ type result struct {
 	index      int
 	path       string
 	render     renderResult
+	payload    []byte
 	processErr error
 }
 
@@ -48,12 +53,37 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 			defer wg.Done()
 			for j := range jobs {
 				r := result{index: j.index, path: j.sf.path}
-				rendered, err := renderFile(j.sf, root, mode, fmtr)
+
+				f, isBin, err := util.SniffAndRewind(j.sf.path)
 				if err != nil {
 					r.processErr = err
+				} else if isBin {
+					r.processErr = ErrBinaryFile
+					f.Close()
 				} else {
-					r.render = rendered
+					rel, _ := filepath.Rel(root, j.sf.path)
+					rel = filepath.ToSlash(rel)
+
+					var buf bytes.Buffer
+					buf.WriteString(fmtr.FileHeader(rel))
+
+					bytes, runes, cerr := renderFile(f, filepath.Ext(j.sf.path), mode, func(line string) error {
+						_, werr := buf.WriteString(line)
+						return werr
+					})
+					f.Close()
+					if cerr != nil {
+						r.processErr = cerr
+					} else {
+						if footer := fmtr.FileFooter(rel); footer != "" {
+							buf.WriteString(footer)
+						}
+						r.render.bytes = bytes
+						r.render.runes = runes
+						r.payload = buf.Bytes()
+					}
 				}
+
 				select {
 				case results <- r:
 				case <-ctx.Done():
@@ -71,9 +101,11 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 	pending := make(map[int]result)
 	next := 0
 	var writeErr error
+	finishedCount := 0
 	for r := range results {
 		if writeErr != nil {
 			rep.FinishFile()
+			finishedCount++
 			continue
 		}
 		pending[r.index] = r
@@ -86,37 +118,30 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 			next++
 
 			if cur.processErr != nil {
-				st.AddError(cur.path + ": " + cur.processErr.Error())
+				if errors.Is(cur.processErr, ErrBinaryFile) {
+					st.AddSkipped(cur.path, stats.ReasonBinary, nil)
+				} else {
+					st.AddError(cur.path + ": " + cur.processErr.Error())
+				}
 				rep.FinishFile()
+				finishedCount++
 				continue
 			}
-			if err := ch.WriteString(cur.render.header); err != nil {
+			if err := ch.WriteBytes(cur.payload, int(cur.render.runes)); err != nil {
 				writeErr = err
 				cancel()
 				rep.FinishFile()
+				finishedCount++
 				break
-			}
-			if err := ch.WriteBytes(cur.render.payload, int(cur.render.runes)); err != nil {
-				writeErr = err
-				cancel()
-				rep.FinishFile()
-				break
-			}
-			if cur.render.footer != "" {
-				if err := ch.WriteString(cur.render.footer); err != nil {
-					writeErr = err
-					cancel()
-					rep.FinishFile()
-					break
-				}
 			}
 			st.IncProcessed(cur.render.bytes, cur.render.runes)
 			rep.FinishFile()
+			finishedCount++
 		}
 	}
 	if writeErr != nil {
 		cancel()
-		for i := next; i < len(files); i++ {
+		for i := finishedCount; i < len(files); i++ {
 			rep.FinishFile()
 		}
 		return writeErr

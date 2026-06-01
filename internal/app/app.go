@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/user-for-download/go-dumper/internal/chunker"
 	"github.com/user-for-download/go-dumper/internal/cleaner"
@@ -60,23 +62,12 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		st.AddError("walk: " + e.Error())
 	}
 
-	textFiles := make([]sniffedFile, 0, len(entries))
-	for _, e := range entries {
-		isBin, serr := util.SniffBinary(e.Path)
-		if serr != nil {
-			st.AddSkipped(e.Path, stats.ReasonError, serr)
-			continue
-		}
-		if isBin {
-			st.AddSkipped(e.Path, stats.ReasonBinary, nil)
-			continue
-		}
-		textFiles = append(textFiles, sniffedFile{
-			path: e.Path, size: e.Size,
-		})
-	}
-
 	st.SetTotalFiles(len(entries))
+
+	files := make([]sniffedFile, len(entries))
+	for i, e := range entries {
+		files[i] = sniffedFile{path: e.Path, size: e.Size}
+	}
 
 	if err := os.MkdirAll(cfg.Output, 0o755); err != nil {
 		return st, err
@@ -87,11 +78,19 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		return st, err
 	}
 
+	ext := ".txt"
+	if cfg.Format == "markdown" || cfg.Format == "md" {
+		ext = ".md"
+	} else if cfg.Format == "xml" {
+		ext = ".xml"
+	}
+
 	ch, err := chunker.New(chunker.Options{
 		OutputDir:      cfg.Output,
 		Prefix:         cfg.ChunkPrefix,
 		MaxSymbols:     cfg.MaxSymbols,
 		SplitLongLines: cfg.SplitLongLines,
+		Extension:      ext,
 	})
 	if err != nil {
 		return st, err
@@ -109,7 +108,7 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		if cfg.Tree.Mode == "include" {
 			treeMode = tree.ModeInclude
 		}
-		treeStr, terr := tree.Generate(tree.Options{
+		treeOpts := tree.Options{
 			Root:          cfg.Path,
 			MaxDepth:      cfg.Tree.MaxDepth,
 			IncludeSizes:  cfg.Tree.IncludeSizes,
@@ -118,7 +117,15 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 			Includes:      includes,
 			Excludes:      excludes,
 			Type:          cfg.Type,
-		})
+		}
+		if treeMode == tree.ModeInclude && len(files) > 0 {
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.path
+			}
+			treeOpts.AllowedFiles = paths
+		}
+		treeStr, terr := tree.Generate(treeOpts)
 		if terr != nil {
 			st.AddError("tree: " + terr.Error())
 		}
@@ -138,16 +145,19 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		}
 	}
 
-	rep := progress.New(cfg.Progress, len(textFiles))
+	rep := progress.New(cfg.Progress, len(files))
 	defer rep.Done()
 
 	if cfg.Concurrency > 1 {
-		if err := RunConcurrent(textFiles, cfg.Path, ch, mode, fmtr, st, rep, cfg.Concurrency); err != nil {
+		if err := RunConcurrent(files, cfg.Path, ch, mode, fmtr, st, rep, cfg.Concurrency); err != nil {
 			return st, err
 		}
 	} else {
-		for _, sf := range textFiles {
-			if err := ProcessFile(sf, cfg.Path, ch, mode, fmtr, st, rep); err != nil {
+		for _, sf := range files {
+			err := ProcessFile(sf, cfg.Path, ch, mode, fmtr, st)
+			if errors.Is(err, ErrBinaryFile) {
+				st.AddSkipped(sf.path, stats.ReasonBinary, nil)
+			} else if err != nil {
 				st.AddError(sf.path + ": " + err.Error())
 			}
 			rep.FinishFile()
@@ -170,22 +180,34 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	return st, nil
 }
 
-func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, mode cleaner.Mode, fmtr format.Formatter, st *stats.Stats, rep *progress.Reporter) error {
-	r, err := renderFile(sf, root, mode, fmtr)
+func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, mode cleaner.Mode, fmtr format.Formatter, st *stats.Stats) error {
+	f, isBin, err := util.SniffAndRewind(sf.path)
 	if err != nil {
 		return err
 	}
-	if err := ch.WriteString(r.header); err != nil {
+	defer f.Close()
+	if isBin {
+		return ErrBinaryFile
+	}
+
+	rel, _ := filepath.Rel(root, sf.path)
+	rel = filepath.ToSlash(rel)
+
+	if err := ch.WriteString(fmtr.FileHeader(rel)); err != nil {
 		return err
 	}
-	if err := ch.WriteBytes(r.payload, int(r.runes)); err != nil {
+
+	bytes, runes, err := renderFile(f, filepath.Ext(sf.path), mode, ch.WriteString)
+	if err != nil {
 		return err
 	}
-	if r.footer != "" {
-		if err := ch.WriteString(r.footer); err != nil {
+
+	if footer := fmtr.FileFooter(rel); footer != "" {
+		if err := ch.WriteString(footer); err != nil {
 			return err
 		}
 	}
-	st.IncProcessed(r.bytes, r.runes)
+
+	st.IncProcessed(bytes, runes)
 	return nil
 }

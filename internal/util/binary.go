@@ -30,6 +30,38 @@ var knownBinaryMagic = [][]byte{
 	{'%', 'P', 'D', 'F'},
 }
 
+// SniffAndRewind opens path, reads the first SniffSize bytes to detect
+// binary content, then seeks back to the beginning. Returns the open file
+// handle on success (caller must close it).
+func SniffAndRewind(path string) (f *os.File, isBinary bool, err error) {
+	f, err = os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	buf := make([]byte, SniffSize)
+	n, rerr := io.ReadFull(f, buf)
+	if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
+		f.Close()
+		return nil, false, rerr
+	}
+	buf = buf[:n]
+	for _, magic := range knownBinaryMagic {
+		if bytes.HasPrefix(buf, magic) {
+			f.Close()
+			return nil, true, nil
+		}
+	}
+	if bytes.IndexByte(buf, 0x00) >= 0 {
+		f.Close()
+		return nil, true, nil
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		f.Close()
+		return nil, false, err
+	}
+	return f, false, nil
+}
+
 func SniffBinary(path string) (isBinary bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {

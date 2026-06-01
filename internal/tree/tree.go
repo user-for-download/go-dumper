@@ -26,7 +26,12 @@ type Options struct {
 	Mode     Mode
 	Includes []string
 	Excludes []string
-	Type     string
+	Type     []string
+
+	// AllowedFiles is an optional list of pre-collected file paths (from the
+	// walker) for ModeInclude. When set, the tree is built from these paths
+	// instead of re-walking the filesystem.
+	AllowedFiles []string
 }
 
 func (o *Options) mode() Mode {
@@ -49,9 +54,20 @@ func Generate(opts Options) (string, error) {
 
 	var allowed map[string]struct{}
 	if opts.mode() == ModeInclude {
-		allowed, err = collectAllowed(opts)
-		if err != nil {
-			return "", err
+		if len(opts.AllowedFiles) > 0 {
+			allowed = make(map[string]struct{}, len(opts.AllowedFiles))
+			for _, p := range opts.AllowedFiles {
+				rel, rerr := filepath.Rel(opts.Root, p)
+				if rerr != nil {
+					continue
+				}
+				allowed[filepath.ToSlash(rel)] = struct{}{}
+			}
+		} else {
+			allowed, err = collectAllowed(opts)
+			if err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -90,15 +106,29 @@ func collectAllowed(opts Options) (map[string]struct{}, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
-		if !matchAny(opts.Includes, rel) {
+		matchedInclude := matchAny(opts.Includes, rel)
+		matchedExclude := matchAny(opts.Excludes, rel)
+
+		if !matchedInclude {
 			return nil
 		}
-		if matchAny(opts.Excludes, rel) {
+		if matchedExclude && !anyIncludeMoreSpecific(opts.Includes, opts.Excludes, rel) {
 			return nil
 		}
-		if opts.Type != "" {
-			ext := strings.TrimPrefix(filepath.Ext(name), ".")
-			if ext != opts.Type {
+		if len(opts.Type) > 0 {
+			ext := filepath.Ext(name)
+			if ext == "" {
+				return nil
+			}
+			cleanExt := strings.TrimPrefix(ext, ".")
+			matched := false
+			for _, t := range opts.Type {
+				if cleanExt == strings.TrimPrefix(t, ".") {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				return nil
 			}
 		}
@@ -123,8 +153,7 @@ func matchAny(patterns []string, rel string) bool {
 		if p == "" {
 			continue
 		}
-		ok, err := doublestar.PathMatch(p, rel)
-		if err == nil && ok {
+		if doublestar.PathMatchUnvalidated(p, rel) {
 			return true
 		}
 	}
@@ -203,6 +232,46 @@ func writeChildren(sb *strings.Builder, dir, prefix string, depth int, opts Opti
 		sb.WriteString(line + "\n")
 	}
 	return nil
+}
+
+func anyIncludeMoreSpecific(includes, excludes []string, rel string) bool {
+	for _, inc := range includes {
+		if inc == "" {
+			continue
+		}
+		if !doublestar.PathMatchUnvalidated(inc, rel) {
+			continue
+		}
+		if !hasWildcard(inc) {
+			return true
+		}
+		for _, exc := range excludes {
+			if exc == "" {
+				continue
+			}
+			if !doublestar.PathMatchUnvalidated(exc, rel) {
+				continue
+			}
+			if patternSpecificity(inc) > patternSpecificity(exc) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasWildcard(p string) bool {
+	return strings.ContainsAny(p, "*?")
+}
+
+func patternSpecificity(p string) int {
+	literals := 0
+	for _, c := range p {
+		if c != '*' && c != '?' {
+			literals++
+		}
+	}
+	return literals
 }
 
 func humanSize(n int64) string {

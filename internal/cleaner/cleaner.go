@@ -4,7 +4,14 @@ import (
 	"bufio"
 	"io"
 	"strings"
+	"sync"
 )
+
+var builderPool = sync.Pool{
+	New: func() any {
+		return new(strings.Builder)
+	},
+}
 
 type Mode int
 
@@ -76,8 +83,10 @@ func stripLine(line string, r langRules, inBlock bool) (string, bool) {
 
 	trimmed := strings.TrimSpace(line)
 
-	var out strings.Builder
+	out := builderPool.Get().(*strings.Builder)
+	out.Reset()
 	out.Grow(len(line))
+	defer builderPool.Put(out)
 	i := 0
 
 	for i < len(line) {

@@ -49,8 +49,8 @@ func main() {
 		dryRun  bool
 		verbose bool
 
-		fPath, fOutput, fChunkPrefix, fClearMode, fStatsFile, fFormat, fTreeMode, fType string
-		fInclude, fExclude                                                              []string
+		fPath, fOutput, fChunkPrefix, fClearMode, fStatsFile, fFormat, fTreeMode string
+		fInclude, fExclude, fType                                                []string
 		fMaxSymbols, fTreeDepth, fConcurrency                                           int
 		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean          bool
 	)
@@ -81,7 +81,8 @@ func main() {
 				o.ExcludeSet = true
 			}
 			if c.Flags().Changed("type") {
-				o.Type = &fType
+				o.Type = fType
+				o.TypeSet = true
 			}
 			if c.Flags().Changed("clean") {
 				o.Clean = &fClean
@@ -183,7 +184,7 @@ func main() {
 		`include patterns (doublestar globs); use @file to load patterns from a file`)
 	rootCmd.Flags().StringSliceVarP(&fExclude, "exclude", "x", nil,
 		`exclude patterns (doublestar globs); use @file to load patterns from a file`)
-	rootCmd.Flags().StringVar(&fType, "type", "", "filter by file extension (e.g., go, js)")
+	rootCmd.Flags().StringSliceVar(&fType, "type", nil, "filter by file extension (e.g., go, js)")
 	rootCmd.Flags().BoolVar(&fClean, "clean", false, "clean output folder before writing")
 	rootCmd.Flags().IntVarP(&fMaxSymbols, "max-symbols", "m", 1_000_000, "max runes per chunk")
 	rootCmd.Flags().StringVar(&fChunkPrefix, "chunk-prefix", "dump", "chunk file prefix")

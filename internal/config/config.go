@@ -25,7 +25,7 @@ type Config struct {
 	Output         string      `json:"output"`
 	Include        []string    `json:"include"`
 	Exclude        []string    `json:"exclude"`
-	Type           string      `json:"type"`
+	Type           []string    `json:"type"`
 	Clean          bool        `json:"clean"`
 	MaxSymbols     int         `json:"max_symbols"`
 	ChunkPrefix    string      `json:"chunk_prefix"`
@@ -153,7 +153,8 @@ type CLIOverrides struct {
 	Exclude        []string
 	IncludeSet     bool
 	ExcludeSet     bool
-	Type           *string
+	Type           []string
+	TypeSet        bool
 	Clean          *bool
 	MaxSymbols     *int
 	ChunkPrefix    *string
@@ -184,8 +185,8 @@ func (c *Config) MergeCLI(o CLIOverrides) error {
 	if o.ExcludeSet {
 		c.Exclude = o.Exclude
 	}
-	if o.Type != nil {
-		c.Type = *o.Type
+	if o.TypeSet {
+		c.Type = o.Type
 	}
 	if o.Clean != nil {
 		c.Clean = *o.Clean

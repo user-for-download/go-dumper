@@ -14,6 +14,7 @@ type initConfig struct {
 	Output         string   `json:"output"`
 	Include        []string `json:"include"`
 	Exclude        []string `json:"exclude"`
+	Type           []string `json:"type"`
 	MaxSymbols     int      `json:"max_symbols"`
 	ChunkPrefix    string   `json:"chunk_prefix"`
 	SplitLongLines bool     `json:"split_long_lines"`
@@ -71,6 +72,7 @@ Tree mode
 				Output:         "./dump_out",
 				Include:        []string{"**/*"},
 				Exclude:        []string{},
+				Type:           []string{},
 				MaxSymbols:     1_000_000,
 				ChunkPrefix:    "dump",
 				SplitLongLines: false,

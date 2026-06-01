@@ -2,6 +2,7 @@ package walker
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,7 +19,7 @@ type Options struct {
 	Root          string
 	Includes      []string
 	Excludes      []string
-	Type          string
+	Type          []string
 	IncludeHidden bool
 }
 
@@ -55,6 +56,7 @@ func normalizePatterns(patterns []string) []string {
 func (w *Walker) Collect() ([]Entry, error) {
 	var result []Entry
 	root := w.opts.Root
+	seen := make(map[string]struct{})
 
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -69,7 +71,8 @@ func (w *Walker) Collect() ([]Entry, error) {
 		name := d.Name()
 
 		isRoot := false
-		if absPath, err := filepath.Abs(path); err == nil {
+		absPath, absErr := filepath.Abs(path)
+		if absErr == nil {
 			isRoot = absPath == absRoot
 		}
 		if !isRoot && !w.opts.IncludeHidden && strings.HasPrefix(name, ".") && name != "." {
@@ -93,9 +96,20 @@ func (w *Walker) Collect() ([]Entry, error) {
 		if w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel) {
 			return nil
 		}
-		if w.opts.Type != "" {
+		if len(w.opts.Type) > 0 {
 			ext := filepath.Ext(name)
-			if ext == "" || strings.TrimPrefix(ext, ".") != w.opts.Type {
+			if ext == "" {
+				return nil
+			}
+			cleanExt := strings.TrimPrefix(ext, ".")
+			matched := false
+			for _, t := range w.opts.Type {
+				if cleanExt == strings.TrimPrefix(t, ".") {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				return nil
 			}
 		}
@@ -105,11 +119,69 @@ func (w *Walker) Collect() ([]Entry, error) {
 			size = info.Size()
 		}
 		result = append(result, Entry{Path: path, Size: size})
+		if absErr == nil {
+			seen[absPath] = struct{}{}
+		}
 		return nil
 	})
 	if err != nil {
 		w.errors = append(w.errors, err)
 	}
+
+	for _, inc := range w.opts.Includes {
+		pat := inc
+		if !filepath.IsAbs(pat) {
+			pat = filepath.Join(root, pat)
+		}
+		matches, _ := doublestar.FilepathGlob(pat)
+		for _, match := range matches {
+			absMatch, absErr := filepath.Abs(match)
+			if absErr != nil {
+				absMatch = match
+			}
+			if _, ok := seen[absMatch]; ok {
+				continue
+			}
+			info, err := os.Stat(match)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			if !w.opts.IncludeHidden && strings.HasPrefix(info.Name(), ".") {
+				continue
+			}
+			rel, relErr := filepath.Rel(root, match)
+			if relErr != nil {
+				rel = match
+			}
+			rel = filepath.ToSlash(rel)
+			if !w.matchAny(w.opts.Includes, rel) {
+				continue
+			}
+			if w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel) {
+				continue
+			}
+			if len(w.opts.Type) > 0 {
+				ext := filepath.Ext(info.Name())
+				if ext == "" {
+					continue
+				}
+				cleanExt := strings.TrimPrefix(ext, ".")
+				matched := false
+				for _, t := range w.opts.Type {
+					if cleanExt == strings.TrimPrefix(t, ".") {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
+			result = append(result, Entry{Path: match, Size: info.Size()})
+			seen[absMatch] = struct{}{}
+		}
+	}
+
 	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
 	return result, nil
 }
@@ -123,8 +195,7 @@ func (w *Walker) matchAny(patterns []string, rel string) bool {
 		if p == "" {
 			continue
 		}
-		ok, err := doublestar.PathMatch(p, rel)
-		if err == nil && ok {
+		if doublestar.PathMatchUnvalidated(p, rel) {
 			return true
 		}
 	}
@@ -151,8 +222,7 @@ func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, 
 		if inc == "" {
 			continue
 		}
-		ok, err := doublestar.PathMatch(inc, rel)
-		if err != nil || !ok {
+		if !doublestar.PathMatchUnvalidated(inc, rel) {
 			continue
 		}
 		if !hasWildcard(inc) {
@@ -162,8 +232,7 @@ func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, 
 			if exc == "" {
 				continue
 			}
-			ok2, err2 := doublestar.PathMatch(exc, rel)
-			if err2 != nil || !ok2 {
+			if !doublestar.PathMatchUnvalidated(exc, rel) {
 				continue
 			}
 			if patternSpecificity(inc) > patternSpecificity(exc) {

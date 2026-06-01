@@ -1,16 +1,17 @@
 package app
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/user-for-download/go-dumper/internal/cleaner"
-	"github.com/user-for-download/go-dumper/internal/format"
 	"github.com/user-for-download/go-dumper/internal/util"
 )
+
+var ErrBinaryFile = errors.New("binary file")
 
 type EffectiveExcludesFunc func(root, output string, excludes []string, excludeSelf bool) []string
 
@@ -27,42 +28,24 @@ type sniffedFile struct {
 }
 
 type renderResult struct {
-	header  string
-	footer  string
-	payload []byte
-	bytes   int64
-	runes   int64
+	header string
+	footer string
+	bytes  int64
+	runes  int64
 }
 
-// renderFile processes a single file and returns its formatted content.
-func renderFile(sf sniffedFile, root string, mode cleaner.Mode, fmtr format.Formatter) (renderResult, error) {
-	var r renderResult
-
-	f, err := os.Open(sf.path)
-	if err != nil {
-		return r, err
+// renderFile streams pre-opened file content through the cleaner into
+// writeLine. The caller is responsible for sniffing binary and writing
+// header/footer. Returns byte and rune counts.
+func renderFile(f *os.File, ext string, mode cleaner.Mode, writeLine func(string) error) (bytes int64, runes int64, err error) {
+	if err := cleaner.Stream(f, ext, mode, func(line string) error {
+		bytes += int64(len(line))
+		runes += int64(util.RuneCount(line))
+		return writeLine(line)
+	}); err != nil {
+		return 0, 0, fmt.Errorf("clean: %w", err)
 	}
-	defer f.Close()
-
-	rel, _ := filepath.Rel(root, sf.path)
-	rel = filepath.ToSlash(rel)
-	r.header = fmtr.FileHeader(rel)
-	r.footer = fmtr.FileFooter(rel)
-
-	ext := filepath.Ext(sf.path)
-
-	var buf bytes.Buffer
-	emit := func(line string) error {
-		r.bytes += int64(len(line))
-		r.runes += int64(util.RuneCount(line))
-		_, err := buf.WriteString(line)
-		return err
-	}
-	if err := cleaner.Stream(f, ext, mode, emit); err != nil {
-		return r, fmt.Errorf("clean: %w", err)
-	}
-	r.payload = buf.Bytes()
-	return r, nil
+	return bytes, runes, nil
 }
 
 func autoExcludeOutput(root string, output string, excludes []string) []string {

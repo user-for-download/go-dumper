@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/user-for-download/go-dumper/internal/util"
@@ -15,6 +16,7 @@ type Options struct {
 	Prefix         string
 	MaxSymbols     int
 	SplitLongLines bool
+	Extension      string
 }
 
 type Chunker struct {
@@ -51,7 +53,13 @@ func (c *Chunker) openNew() error {
 		_ = c.current.Close()
 	}
 	c.chunkIdx++
-	name := fmt.Sprintf("%s_%05d.txt", c.opts.Prefix, c.chunkIdx)
+	ext := c.opts.Extension
+	if ext == "" {
+		ext = ".txt"
+	} else if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	name := fmt.Sprintf("%s_%05d%s", c.opts.Prefix, c.chunkIdx, ext)
 	path := filepath.Join(c.opts.OutputDir, name)
 	f, err := os.Create(path)
 	if err != nil {
@@ -134,25 +142,26 @@ func (c *Chunker) rawWrite(s string, runes int) error {
 }
 
 func (c *Chunker) writeSplit(s string, totalRunes int) error {
-	runes := []rune(s)
 	max := c.opts.MaxSymbols
-	i := 0
-	for i < len(runes) {
-		if c.curSymbols > 0 {
+	var pieceStart int
+	runeCount := 0
+
+	for i := range s {
+		if runeCount == max {
+			if err := c.rawWrite(s[pieceStart:i], runeCount); err != nil {
+				return err
+			}
 			if err := c.openNew(); err != nil {
 				return err
 			}
+			pieceStart = i
+			runeCount = 0
 		}
-		end := i + max
-		if end > len(runes) {
-			end = len(runes)
-		}
-		piece := string(runes[i:end])
-		pieceRunes := end - i
-		if err := c.rawWrite(piece, pieceRunes); err != nil {
-			return err
-		}
-		i = end
+		runeCount++
+	}
+
+	if pieceStart < len(s) {
+		return c.rawWrite(s[pieceStart:], runeCount)
 	}
 	return nil
 }
