@@ -60,6 +60,35 @@ piece := string(runes[i:end])
 
 `RunConcurrent` uses a reorder buffer (`pending map[int]result`) keyed by input index. Results are drained in order once their turn comes, guaranteeing output file order matches input order regardless of read completion order.
 
+### Absolute Path Handling (`toRel`)
+
+When `--include` specifies an absolute path outside the scan root (e.g., `--include /home/user/other/.env`), the walker still resolves it via `doublestar.FilepathGlob`. The `app.toRel()` helper bridges the absolute path back to the output formatter:
+
+```go
+func toRel(root, path string) string {
+    absRoot, _ := filepath.Abs(root)
+    absPath, _ := filepath.Abs(path)
+    rel, err := filepath.Rel(absRoot, absPath)
+    if err != nil {
+        return filepath.ToSlash(path)  // fallback to original
+    }
+    return filepath.ToSlash(rel)
+}
+```
+
+This is used in both `ProcessFile` (serial) and `RunConcurrent` (parallel) to ensure file headers show a sensible relative path even when the file lives outside the project root.
+
+### Explicit Config Error
+
+`config.Load(path, explicit bool)` takes an `explicit` parameter. When `true` and the config file does not exist, it returns a hard error (`"config file %q not found"`) instead of silently falling back to defaults. This is triggered in `main.go` via `c.Flags().Changed("config")`.
+
+### Hidden File Glob Phase
+
+The walker's `Collect()` has two phases:
+
+1. **WalkDir phase** — respects `IncludeHidden` flag; skips dotfiles/dirs when false
+2. **Glob phase** — explicitly named hidden files (e.g., `/path/to/.env`) are allowed regardless of `IncludeHidden`, so an explicit `--include` of a hidden file always works
+
 ### Auto-Exclusions
 
 Three automatic exclusions are applied:

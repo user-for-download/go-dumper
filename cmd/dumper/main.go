@@ -60,7 +60,7 @@ func main() {
 		Short: "Project text dumper",
 		Long:  longHelp,
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cfgPath)
+			cfg, err := config.Load(cfgPath, c.Flags().Changed("config"))
 			if err != nil {
 				return err
 			}
@@ -150,6 +150,7 @@ func main() {
 					Root:          cfg.Path,
 					Includes:      includes,
 					Excludes:      excludes,
+					Type:          cfg.Type,
 					IncludeHidden: cfg.IncludeHidden,
 				})
 				if err != nil {

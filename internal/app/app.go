@@ -17,6 +17,22 @@ import (
 	"github.com/user-for-download/go-dumper/internal/walker"
 )
 
+func toRel(root, path string) string {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
 func Run(cfg *config.Config) (*stats.Stats, error) {
 	st := stats.New()
 	finished := false
@@ -190,8 +206,7 @@ func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, mode cleaner.
 		return ErrBinaryFile
 	}
 
-	rel, _ := filepath.Rel(root, sf.path)
-	rel = filepath.ToSlash(rel)
+	rel := toRel(root, sf.path)
 
 	if err := ch.WriteString(fmtr.FileHeader(rel)); err != nil {
 		return err

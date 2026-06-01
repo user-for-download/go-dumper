@@ -61,8 +61,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 					r.processErr = ErrBinaryFile
 					f.Close()
 				} else {
-					rel, _ := filepath.Rel(root, j.sf.path)
-					rel = filepath.ToSlash(rel)
+					rel := toRel(root, j.sf.path)
 
 					var buf bytes.Buffer
 					buf.WriteString(fmtr.FileHeader(rel))

@@ -67,6 +67,15 @@ go install ./cmd/dumper
 
 # Clean output folder before writing
 ./dumper --clean
+
+# Include hidden files (dotfiles and dotdirs)
+./dumper --include-hidden
+
+# Include an absolute path outside the project root
+./dumper --include "/home/user/other/.env"
+
+# Force explicit config file (errors if missing)
+./dumper --config ./prc.json
 ```
 
 ## Config File
@@ -78,18 +87,18 @@ go install ./cmd/dumper
   "path": ".",
   "output": "./dump_out",
   "include": ["**/*"],
-  "exclude": [".git/**", "dump_out/**", "node_modules/**", "vendor/**"],
-  "type": "",
+  "exclude": [],
+  "type": [],
   "clean": false,
   "max_symbols": 1000000,
   "chunk_prefix": "dump",
-  "split_long_lines": true,
+  "split_long_lines": false,
   "progress": true,
-  "stats_file": "dump_out/stats.json",
+  "stats_file": "",
   "include_hidden": false,
   "concurrency": 1,
   "exclude_self": true,
-  "format": "markdown",
+  "format": "plain",
   "clear": {
     "enabled": false,
     "mode": "line"
@@ -99,7 +108,7 @@ go install ./cmd/dumper
     "format": "ascii",
     "max_depth": 0,
     "include_sizes": true,
-    "mode": "include"
+    "mode": "full"
   }
 }
 ```
@@ -107,6 +116,8 @@ go install ./cmd/dumper
 ### Config Precedence
 
 JSON defaults → config file → CLI flags. Each level overrides the previous.
+
+**Note:** If the `--config` flag is explicitly passed and the file does not exist, dumper will exit with an error instead of silently falling back to defaults. This prevents accidentally running with unexpected settings when the config path is mistyped.
 
 ## CLI Flags
 

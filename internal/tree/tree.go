@@ -56,10 +56,12 @@ func Generate(opts Options) (string, error) {
 	if opts.mode() == ModeInclude {
 		if len(opts.AllowedFiles) > 0 {
 			allowed = make(map[string]struct{}, len(opts.AllowedFiles))
+			absRoot, _ := filepath.Abs(opts.Root)
 			for _, p := range opts.AllowedFiles {
-				rel, rerr := filepath.Rel(opts.Root, p)
+				absPath, _ := filepath.Abs(p)
+				rel, rerr := filepath.Rel(absRoot, absPath)
 				if rerr != nil {
-					continue
+					rel = p // Fallback
 				}
 				allowed[filepath.ToSlash(rel)] = struct{}{}
 			}

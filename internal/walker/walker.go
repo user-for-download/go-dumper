@@ -84,7 +84,8 @@ func (w *Walker) Collect() ([]Entry, error) {
 		if d.IsDir() {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
+		
+		rel, relErr := filepath.Rel(absRoot, absPath)
 		if relErr != nil {
 			rel = path
 		}
@@ -146,14 +147,15 @@ func (w *Walker) Collect() ([]Entry, error) {
 			if err != nil || info.IsDir() {
 				continue
 			}
-			if !w.opts.IncludeHidden && strings.HasPrefix(info.Name(), ".") {
-				continue
-			}
-			rel, relErr := filepath.Rel(root, match)
+			
+			// We intentionally skip the IncludeHidden check here so explicitly named hidden files are allowed.
+			
+			rel, relErr := filepath.Rel(absRoot, absMatch)
 			if relErr != nil {
 				rel = match
 			}
 			rel = filepath.ToSlash(rel)
+			
 			if !w.matchAny(w.opts.Includes, rel) {
 				continue
 			}
@@ -244,7 +246,7 @@ func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, 
 }
 
 func hasWildcard(p string) bool {
-	return strings.Contains(p, "*") || strings.Contains(p, "?")
+	return strings.ContainsAny(p, "*?")
 }
 
 func patternSpecificity(p string) int {

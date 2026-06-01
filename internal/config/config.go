@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -55,17 +56,20 @@ func defaults() *Config {
 	}
 }
 
-func Load(path string) (*Config, error) {
+func Load(path string, explicit bool) (*Config, error) {
 	cfg := defaults()
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		if explicit {
+			return nil, fmt.Errorf("config file %q not found", path)
+		}
 		return cfg, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config: %w", err)
 	}
 	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse config %q (check for JSON syntax errors like trailing commas or incorrect types): %w", path, err)
 	}
 	cfg.normalize()
 	return cfg, nil
