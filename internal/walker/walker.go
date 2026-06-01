@@ -148,7 +148,13 @@ func (w *Walker) Collect() ([]Entry, error) {
 				continue
 			}
 
-			// We intentionally skip the IncludeHidden check here so explicitly named hidden files are allowed.
+			// Skip IncludeHidden check for explicit (non-wildcard) patterns so that
+			// explicitly named hidden files like "/path/to/.env" are always allowed.
+			if !w.opts.IncludeHidden && strings.HasPrefix(info.Name(), ".") {
+				if hasWildcard(inc) {
+					continue
+				}
+			}
 
 			rel, relErr := filepath.Rel(absRoot, absMatch)
 			if relErr != nil {

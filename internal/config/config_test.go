@@ -81,7 +81,7 @@ func TestValidate_ValidTreeModes(t *testing.T) {
 }
 
 func TestLoad_Defaults(t *testing.T) {
-	cfg, err := Load("/nonexistent/config.json")
+	cfg, err := Load("/nonexistent/config.json", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
-	cfg, err := Load("/tmp/nonexistent_path_12345.json")
+	cfg, err := Load("/tmp/nonexistent_path_12345.json", false)
 	if err != nil {
 		t.Fatalf("Load should not error on missing file: %v", err)
 	}
@@ -203,8 +203,15 @@ func TestLoad_InvalidJSON(t *testing.T) {
 	}
 	tmp.Close()
 
-	_, err = Load(tmp.Name())
+	_, err = Load(tmp.Name(), false)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestLoad_ExplicitMissingFile(t *testing.T) {
+	_, err := Load("/tmp/nonexistent_path_12345.json", true)
+	if err == nil {
+		t.Fatal("expected error for explicit missing file")
 	}
 }
