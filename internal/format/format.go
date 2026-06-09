@@ -12,6 +12,7 @@ type Formatter interface {
 	TreeBlock(tree string) string
 	FileHeader(relPath string) string
 	FileFooter(relPath string) string
+	EscapeBody(s string) string
 }
 
 func New(name string) (Formatter, error) {
@@ -34,6 +35,7 @@ func (plainFmt) Postamble() string            { return "" }
 func (plainFmt) TreeBlock(t string) string    { return "===== PROJECT TREE =====\n" + t + "\n" }
 func (plainFmt) FileHeader(rel string) string { return "\n===== FILE: " + rel + " =====\n" }
 func (plainFmt) FileFooter(string) string     { return "" }
+func (plainFmt) EscapeBody(s string) string   { return s }
 
 type markdownFmt struct{}
 
@@ -45,7 +47,8 @@ func (markdownFmt) TreeBlock(t string) string {
 func (markdownFmt) FileHeader(rel string) string {
 	return "\n## `" + rel + "`\n\n```" + langFromPath(rel) + "\n"
 }
-func (markdownFmt) FileFooter(string) string { return "```\n" }
+func (markdownFmt) FileFooter(string) string   { return "```\n" }
+func (markdownFmt) EscapeBody(s string) string { return s }
 
 type xmlFmt struct{}
 
@@ -56,6 +59,11 @@ func (xmlFmt) FileHeader(rel string) string {
 	return "<file path=\"" + xmlEscape(rel) + "\"><![CDATA[\n"
 }
 func (xmlFmt) FileFooter(string) string { return "]]></file>\n" }
+func (xmlFmt) EscapeBody(s string) string {
+	// Escape ]]> inside CDATA sections using the standard CDATA escaping trick:
+	// split the CDATA at each ]]> so the content round-trips safely.
+	return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[")
+}
 
 func xmlEscape(s string) string {
 	r := strings.NewReplacer(`&`, `&amp;`, `<`, `&lt;`, `>`, `&gt;`, `"`, `&quot;`)

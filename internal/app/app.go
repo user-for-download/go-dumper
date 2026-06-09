@@ -212,7 +212,9 @@ func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, mode cleaner.
 		return err
 	}
 
-	bytes, runes, err := renderFile(f, filepath.Ext(sf.path), mode, ch.WriteString)
+	bytes, runes, err := renderFile(f, filepath.Ext(sf.path), mode, func(line string) error {
+		return ch.WriteString(fmtr.EscapeBody(line))
+	})
 	if err != nil {
 		return err
 	}

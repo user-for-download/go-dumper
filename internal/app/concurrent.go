@@ -67,7 +67,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 					buf.WriteString(fmtr.FileHeader(rel))
 
 					bytes, runes, cerr := renderFile(f, filepath.Ext(j.sf.path), mode, func(line string) error {
-						_, werr := buf.WriteString(line)
+						_, werr := buf.WriteString(fmtr.EscapeBody(line))
 						return werr
 					})
 					f.Close()
@@ -86,10 +86,6 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 				select {
 				case results <- r:
 				case <-ctx.Done():
-					select {
-					case results <- r:
-					default:
-					}
 					return
 				}
 			}
@@ -139,7 +135,6 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 		}
 	}
 	if writeErr != nil {
-		cancel()
 		for i := finishedCount; i < len(files); i++ {
 			rep.FinishFile()
 		}

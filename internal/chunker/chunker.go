@@ -72,41 +72,20 @@ func (c *Chunker) openNew() error {
 }
 
 func (c *Chunker) WriteString(s string) error {
-	return c.writeKnown(s, util.RuneCount(s))
+	return c.writeInternal(s, util.RuneCount(s))
 }
 
 func (c *Chunker) WriteBytes(b []byte, runes int) error {
 	if len(b) == 0 || runes == 0 {
 		return nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if err := c.ensureOpen(); err != nil {
-		return err
-	}
-
-	if c.curSymbols > 0 && c.curSymbols+runes > c.opts.MaxSymbols {
-		if err := c.openNew(); err != nil {
-			return err
-		}
-	}
-
-	if runes <= c.opts.MaxSymbols {
-		_, err := c.bw.Write(b)
-		if err == nil {
-			c.curSymbols += runes
-		}
-		return err
-	}
-
-	if !c.opts.SplitLongLines {
-		return fmt.Errorf("file exceeds max symbols (%d > %d) and split_long_lines is false", runes, c.opts.MaxSymbols)
-	}
-	return c.writeSplit(string(b), runes)
+	return c.writeInternal(string(b), runes)
 }
 
-func (c *Chunker) writeKnown(s string, runes int) error {
+// writeInternal is the single core write path — both WriteString and WriteBytes
+// delegate here. It acquires the lock and handles rotation, splitting, and
+// symbol accounting in one consistent code path.
+func (c *Chunker) writeInternal(s string, runes int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -128,7 +107,7 @@ func (c *Chunker) writeKnown(s string, runes int) error {
 		return c.rawWrite(s, runes)
 	}
 	if !c.opts.SplitLongLines {
-		return fmt.Errorf("line exceeds max symbols (%d > %d) and split_long_lines is false", runes, c.opts.MaxSymbols)
+		return fmt.Errorf("content exceeds max symbols (%d > %d) and split_long_lines is false", runes, c.opts.MaxSymbols)
 	}
 	return c.writeSplit(s, runes)
 }
