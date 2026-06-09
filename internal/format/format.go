@@ -47,7 +47,12 @@ func (markdownFmt) TreeBlock(t string) string {
 func (markdownFmt) FileHeader(rel string) string {
 	return "\n## `" + rel + "`\n\n```" + langFromPath(rel) + "\n"
 }
-func (markdownFmt) FileFooter(string) string   { return "```\n" }
+func (markdownFmt) FileFooter(string) string { return "```\n" }
+
+// EscapeBody is a no-op for markdown. File content containing ``` will break
+// the fenced code block — there is no way to escape ``` inside a standard
+// fenced block. The markdown format is intended for human readability, not
+// round-trip safety. Use "plain" format for reassembly.
 func (markdownFmt) EscapeBody(s string) string { return s }
 
 type xmlFmt struct{}

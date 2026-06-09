@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/user-for-download/go-dumper/internal/cleaner"
+	"github.com/user-for-download/go-dumper/internal/format"
 	"github.com/user-for-download/go-dumper/internal/util"
 )
 
@@ -35,13 +36,15 @@ type renderResult struct {
 }
 
 // renderFile streams pre-opened file content through the cleaner into
-// writeLine. The caller is responsible for sniffing binary and writing
-// header/footer. Returns byte and rune counts.
-func renderFile(f *os.File, ext string, mode cleaner.Mode, writeLine func(string) error) (bytes int64, runes int64, err error) {
+// writeLine, applying the formatter's EscapeBody to each line before counting
+// and writing. The caller is responsible for sniffing binary and writing
+// header/footer. Returns byte and rune counts of the escaped output.
+func renderFile(f *os.File, ext string, mode cleaner.Mode, fmtr format.Formatter, writeLine func(string) error) (bytes int64, runes int64, err error) {
 	if err := cleaner.Stream(f, ext, mode, func(line string) error {
-		bytes += int64(len(line))
-		runes += int64(util.RuneCount(line))
-		return writeLine(line)
+		escaped := fmtr.EscapeBody(line)
+		bytes += int64(len(escaped))
+		runes += int64(util.RuneCount(escaped))
+		return writeLine(escaped)
 	}); err != nil {
 		return 0, 0, fmt.Errorf("clean: %w", err)
 	}

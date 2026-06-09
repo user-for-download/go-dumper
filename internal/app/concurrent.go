@@ -66,8 +66,8 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 					var buf bytes.Buffer
 					buf.WriteString(fmtr.FileHeader(rel))
 
-					bytes, runes, cerr := renderFile(f, filepath.Ext(j.sf.path), mode, func(line string) error {
-						_, werr := buf.WriteString(fmtr.EscapeBody(line))
+					bytes, runes, cerr := renderFile(f, filepath.Ext(j.sf.path), mode, fmtr, func(line string) error {
+						_, werr := buf.WriteString(line)
 						return werr
 					})
 					f.Close()

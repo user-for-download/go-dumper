@@ -7,39 +7,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/user-for-download/go-dumper/internal/config"
 )
-
-type initConfig struct {
-	Path           string   `json:"path"`
-	Output         string   `json:"output"`
-	Include        []string `json:"include"`
-	Exclude        []string `json:"exclude"`
-	Type           []string `json:"type"`
-	MaxSymbols     int      `json:"max_symbols"`
-	ChunkPrefix    string   `json:"chunk_prefix"`
-	SplitLongLines bool     `json:"split_long_lines"`
-	Progress       bool     `json:"progress"`
-	StatsFile      string   `json:"stats_file"`
-	IncludeHidden  bool     `json:"include_hidden"`
-	Concurrency    int      `json:"concurrency"`
-	ExcludeSelf    bool     `json:"exclude_self"`
-	Format         string   `json:"format"`
-	Clear          clearCfg `json:"clear"`
-	Tree           treeCfg  `json:"tree"`
-}
-
-type clearCfg struct {
-	Enabled bool   `json:"enabled"`
-	Mode    string `json:"mode"`
-}
-
-type treeCfg struct {
-	Enabled      bool   `json:"enabled"`
-	Format       string `json:"format"`
-	MaxDepth     int    `json:"max_depth"`
-	IncludeSizes bool   `json:"include_sizes"`
-	Mode         string `json:"mode"`
-}
 
 func newInitCmd() *cobra.Command {
 	var (
@@ -67,35 +37,7 @@ Tree mode
 				return fmt.Errorf("stat %q: %w", out, err)
 			}
 
-			cfg := initConfig{
-				Path:           ".",
-				Output:         "./dump_out",
-				Include:        []string{"**/*"},
-				Exclude:        []string{},
-				Type:           []string{},
-				MaxSymbols:     1_000_000,
-				ChunkPrefix:    "dump",
-				SplitLongLines: false,
-				Progress:       true,
-				StatsFile:      "",
-				IncludeHidden:  false,
-				Concurrency:    1,
-				ExcludeSelf:    true,
-				Format:         "plain",
-				Clear: clearCfg{
-					Enabled: false,
-					Mode:    "line",
-				},
-				Tree: treeCfg{
-					Enabled:      true,
-					Format:       "ascii",
-					MaxDepth:     0,
-					IncludeSizes: true,
-					Mode:         "full",
-				},
-			}
-
-			data, err := json.MarshalIndent(cfg, "", "  ")
+			data, err := json.MarshalIndent(config.InitDefaults(), "", "  ")
 			if err != nil {
 				return fmt.Errorf("marshal config: %w", err)
 			}

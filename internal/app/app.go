@@ -95,9 +95,10 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	}
 
 	ext := ".txt"
-	if cfg.Format == "markdown" || cfg.Format == "md" {
+	switch cfg.Format {
+	case "markdown":
 		ext = ".md"
-	} else if cfg.Format == "xml" {
+	case "xml":
 		ext = ".xml"
 	}
 
@@ -212,9 +213,7 @@ func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, mode cleaner.
 		return err
 	}
 
-	bytes, runes, err := renderFile(f, filepath.Ext(sf.path), mode, func(line string) error {
-		return ch.WriteString(fmtr.EscapeBody(line))
-	})
+	bytes, runes, err := renderFile(f, filepath.Ext(sf.path), mode, fmtr, ch.WriteString)
 	if err != nil {
 		return err
 	}

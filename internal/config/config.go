@@ -56,6 +56,15 @@ func defaults() *Config {
 	}
 }
 
+// InitDefaults returns defaults suitable for dumper init — same as defaults()
+// but with progress and tree enabled (friendlier for interactive use).
+func InitDefaults() *Config {
+	cfg := defaults()
+	cfg.Progress = true
+	cfg.Tree.Enabled = true
+	return cfg
+}
+
 func Load(path string, explicit bool) (*Config, error) {
 	cfg := defaults()
 	data, err := os.ReadFile(path)
