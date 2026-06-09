@@ -198,12 +198,26 @@ func (w *Walker) Errors() []error {
 	return w.errors
 }
 
+// matchPattern checks whether pattern matches rel. For wildcard patterns it
+// uses doublestar.PathMatchUnvalidated. For plain (non-wildcard) patterns it
+// also matches as a directory prefix — e.g. pattern "cmd" matches "cmd/main.go".
+func matchPattern(pattern, rel string) bool {
+	if doublestar.PathMatchUnvalidated(pattern, rel) {
+		return true
+	}
+	if !hasWildcard(pattern) {
+		dirPrefix := strings.TrimSuffix(pattern, "/") + "/"
+		return strings.HasPrefix(rel, dirPrefix)
+	}
+	return false
+}
+
 func (w *Walker) matchAny(patterns []string, rel string) bool {
 	for _, p := range patterns {
 		if p == "" {
 			continue
 		}
-		if doublestar.PathMatchUnvalidated(p, rel) {
+		if matchPattern(p, rel) {
 			return true
 		}
 	}
@@ -230,17 +244,18 @@ func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, 
 		if inc == "" {
 			continue
 		}
-		if !doublestar.PathMatchUnvalidated(inc, rel) {
+		if !matchPattern(inc, rel) {
 			continue
 		}
-		if !hasWildcard(inc) {
+		// Exact file match (no wildcards, PathMatch succeeded) always wins.
+		if !hasWildcard(inc) && doublestar.PathMatchUnvalidated(inc, rel) {
 			return true
 		}
 		for _, exc := range excludes {
 			if exc == "" {
 				continue
 			}
-			if !doublestar.PathMatchUnvalidated(exc, rel) {
+			if !matchPattern(exc, rel) {
 				continue
 			}
 			if patternSpecificity(inc) > patternSpecificity(exc) {
