@@ -105,7 +105,9 @@ func stripLine(line string, r langRules, inBlock bool) (string, bool) {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "#!") && i == 0 {
+		if i == 0 && strings.HasPrefix(trimmed, "#!") {
+			// Shebang lines must be preserved verbatim (including any leading
+			// whitespace) so the kernel can interpret them correctly.
 			out.WriteString(line)
 			i = len(line)
 			continue

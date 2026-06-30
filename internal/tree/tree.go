@@ -61,7 +61,9 @@ func Generate(opts Options) (string, error) {
 				absPath, _ := filepath.Abs(p)
 				rel, rerr := filepath.Rel(absRoot, absPath)
 				if rerr != nil {
-					rel = p // Fallback
+					// Fallback: strip leading "./" and normalize so the key
+					// matches the format writeChildren builds (e.g. "foo/bar.go").
+					rel = filepath.Clean(p)
 				}
 				allowed[filepath.ToSlash(rel)] = struct{}{}
 			}

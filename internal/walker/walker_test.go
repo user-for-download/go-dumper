@@ -157,6 +157,53 @@ func TestWalker_IncludeHidden_True(t *testing.T) {
 	}
 }
 
+func TestIsInsideHiddenDir(t *testing.T) {
+	tests := []struct {
+		path, root string
+		want       bool
+	}{
+		{"/project/.hidden/file.go", "/project", true},
+		{"/project/.git/config", "/project", true},
+		{"/project/src/main.go", "/project", false},
+		{"/project/.hidden/.nested/file.go", "/project", true},
+	}
+	for _, tt := range tests {
+		got := isInsideHiddenDir(tt.path, tt.root)
+		if got != tt.want {
+			t.Errorf("isInsideHiddenDir(%q, %q) = %v, want %v", tt.path, tt.root, got, tt.want)
+		}
+	}
+}
+
+func TestWalker_FilesInsideHiddenDirExcluded(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".hidden", "secret.go"), "package secret")
+	writeFile(t, filepath.Join(root, "visible.go"), "package visible")
+
+	w, err := New(Options{
+		Root:          root,
+		Includes:      []string{"**/*"},
+		IncludeHidden: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var names []string
+	for _, e := range entries {
+		rel, _ := filepath.Rel(root, e.Path)
+		names = append(names, filepath.ToSlash(rel))
+	}
+
+	if len(names) != 1 || names[0] != "visible.go" {
+		t.Errorf("files inside hidden dirs should be excluded: got %v", names)
+	}
+}
+
 func TestWalker_Errors(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "a.txt"), "a")

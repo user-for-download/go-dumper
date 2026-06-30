@@ -148,12 +148,20 @@ func (w *Walker) Collect() ([]Entry, error) {
 				continue
 			}
 
-			// Skip IncludeHidden check for explicit (non-wildcard) patterns so that
-			// explicitly named hidden files like "/path/to/.env" are always allowed.
+			// Skip hidden files when IncludeHidden is false, unless the pattern
+			// is an explicit (non-wildcard) reference like "@file.txt" that
+			// intentionally names a hidden file.
 			if !w.opts.IncludeHidden && strings.HasPrefix(info.Name(), ".") {
 				if hasWildcard(inc) {
 					continue
 				}
+			}
+
+			// Also skip files whose parent directory is hidden. The glob phase
+			// doesn't prune hidden directories like WalkDir does, so we need
+			// to check here to stay consistent.
+			if !w.opts.IncludeHidden && isInsideHiddenDir(match, root) {
+				continue
 			}
 
 			rel, relErr := filepath.Rel(absRoot, absMatch)
@@ -261,6 +269,21 @@ func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, 
 			if patternSpecificity(inc) > patternSpecificity(exc) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// isInsideHiddenDir reports whether path contains a hidden directory component
+// (a segment starting with '.') between root and the file itself.
+func isInsideHiddenDir(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	for _, part := range strings.Split(filepath.Dir(rel), string(filepath.Separator)) {
+		if strings.HasPrefix(part, ".") && part != "." {
+			return true
 		}
 	}
 	return false

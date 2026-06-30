@@ -283,3 +283,27 @@ func TestGenerate_ModeDefault_IsFull(t *testing.T) {
 		t.Errorf("empty Mode should default to full (all files shown), got:\n%s", out)
 	}
 }
+
+func TestGenerate_ModeInclude_WithAllowedFiles(t *testing.T) {
+	root := setupFilteredTree(t)
+	out, err := Generate(Options{
+		Root: root,
+		Mode: ModeInclude,
+		AllowedFiles: []string{
+			filepath.Join(root, "go.mod"),
+			filepath.Join(root, "cmd", "dumper", "main.go"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "go.mod") {
+		t.Errorf("go.mod should appear via AllowedFiles, got:\n%s", out)
+	}
+	if !strings.Contains(out, "main.go") {
+		t.Errorf("main.go should appear via AllowedFiles, got:\n%s", out)
+	}
+	if strings.Contains(out, "vendor/") {
+		t.Errorf("vendor/ should not appear (not in AllowedFiles), got:\n%s", out)
+	}
+}
