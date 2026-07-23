@@ -4,7 +4,12 @@
   "include": [
     "**/*"
   ],
-  "exclude": [],
+  "exclude": [
+    "**/node_modules/**",
+    ".git/**",
+    "**/.git/**",
+    "dump_out/**"
+  ],
   "max_symbols": 1000000,
   "chunk_prefix": "dump",
   "split_long_lines": false,

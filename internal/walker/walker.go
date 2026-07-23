@@ -82,6 +82,19 @@ func (w *Walker) Collect() ([]Entry, error) {
 			return nil
 		}
 		if d.IsDir() {
+			// Check if this directory matches any exclude pattern.
+			// If so, skip the entire subtree instead of descending into it.
+			dirRel, dirErr := filepath.Rel(absRoot, absPath)
+			if dirErr == nil {
+				dirSlash := filepath.ToSlash(dirRel)
+				for _, exc := range w.opts.Excludes {
+					// Match the directory itself (e.g. "**/node_modules")
+					// or any file inside it (e.g. "**/node_modules/**").
+					if matchPattern(exc, dirSlash) || matchPattern(exc, dirSlash+"/**") {
+						return filepath.SkipDir
+					}
+				}
+			}
 			return nil
 		}
 
