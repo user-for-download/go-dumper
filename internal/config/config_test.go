@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -36,14 +37,6 @@ func TestValidate_InvalidMaxSymbols(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidClearMode(t *testing.T) {
-	cfg := defaults()
-	cfg.Clear.Mode = "bad"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected invalid clear.mode error")
-	}
-}
-
 func TestValidate_InvalidTreeMode(t *testing.T) {
 	cfg := defaults()
 	cfg.Tree.Mode = "bad"
@@ -57,16 +50,6 @@ func TestValidate_InvalidTreeMaxDepth(t *testing.T) {
 	cfg.Tree.MaxDepth = -1
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected invalid tree.max_depth error")
-	}
-}
-
-func TestValidate_ValidClearModes(t *testing.T) {
-	for _, mode := range []string{"", "line", "line_and_block"} {
-		cfg := defaults()
-		cfg.Clear.Mode = mode
-		if err := cfg.Validate(); err != nil {
-			t.Errorf("clear.mode=%q should be valid: %v", mode, err)
-		}
 	}
 }
 
@@ -140,7 +123,7 @@ func TestValidate_EmptyOutput(t *testing.T) {
 }
 
 func TestValidate_ValidFormats(t *testing.T) {
-	for _, f := range []string{"plain", "markdown", "xml"} {
+	for _, f := range []string{"plain", "markdown"} {
 		cfg := defaults()
 		cfg.Format = f
 		if err := cfg.Validate(); err != nil {
@@ -173,9 +156,6 @@ func TestDefaults(t *testing.T) {
 	}
 	if !cfg.ExcludeSelf {
 		t.Error("default exclude_self should be true")
-	}
-	if cfg.Clear.Enabled {
-		t.Error("default clear.enabled should be false")
 	}
 	if cfg.Tree.Enabled {
 		t.Error("default tree.enabled should be false")
@@ -213,5 +193,29 @@ func TestLoad_ExplicitMissingFile(t *testing.T) {
 	_, err := Load("/tmp/nonexistent_path_12345.json", true)
 	if err == nil {
 		t.Fatal("expected error for explicit missing file")
+	}
+}
+
+func TestValidate_RejectsOutputAncestor(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "project")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaults()
+	cfg.Path = root
+	cfg.Output = parent
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected output ancestor to be rejected")
+	}
+}
+
+func TestValidate_AllowsOutputDescendant(t *testing.T) {
+	root := t.TempDir()
+	cfg := defaults()
+	cfg.Path = root
+	cfg.Output = filepath.Join(root, "dump_out")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("output descendant should be valid: %v", err)
 	}
 }

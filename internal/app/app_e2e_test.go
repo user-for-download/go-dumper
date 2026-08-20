@@ -48,10 +48,6 @@ func TestE2E_FullPipeline_NoLimits(t *testing.T) {
 		ChunkPrefix: "dump",
 		StatsFile:   filepath.Join(out, "stats.json"),
 		Format:      "plain",
-		Clear: config.ClearConfig{
-			Enabled: true,
-			Mode:    "line_and_block",
-		},
 		Tree: config.TreeConfig{
 			Enabled: true,
 		},
@@ -86,19 +82,11 @@ func TestE2E_FullPipeline_NoLimits(t *testing.T) {
 		t.Errorf("vendor must be excluded")
 	}
 
-	if strings.Contains(content, "// header comment") {
-		t.Errorf("line comment must be stripped")
-	}
-	if strings.Contains(content, "block\n   comment") {
-		t.Errorf("block comment must be stripped")
-	}
-	if strings.Contains(content, "# launcher") {
-		t.Errorf("shell comment must be stripped")
-	}
-
 	for _, want := range []string{
 		`package main`,
 		`fmt.Println("hi")`,
+		`// header comment`,
+		`block`,
 		`func Add(a, b int) int`,
 		`echo run`,
 		`Hello world`,
@@ -147,9 +135,6 @@ func TestE2E_Chunking_RespectsMaxSymbols(t *testing.T) {
 		ChunkPrefix:    "dump",
 		SplitLongLines: true,
 		Format:         "plain",
-		Clear: config.ClearConfig{
-			Enabled: false,
-		},
 	}
 
 	_, err := Run(cfg)
@@ -186,9 +171,6 @@ func TestE2E_Reassembly_PreservesContent(t *testing.T) {
 		ChunkPrefix:    "dump",
 		SplitLongLines: true,
 		Format:         "plain",
-		Clear: config.ClearConfig{
-			Enabled: false,
-		},
 	}
 
 	_, err := Run(cfg)
@@ -208,9 +190,6 @@ func TestE2E_Reassembly_PreservesContent(t *testing.T) {
 		ChunkPrefix:    "dump",
 		SplitLongLines: false,
 		Format:         "plain",
-		Clear: config.ClearConfig{
-			Enabled: false,
-		},
 	}
 
 	_, err = Run(cfg2)

@@ -14,8 +14,7 @@ func ExpandPatterns(patterns []string) ([]string, error) {
 func expandAtFiles(patterns []string) ([]string, error) {
 	var out []string
 	for _, p := range patterns {
-		p = strings.TrimSpace(p)
-		if p == "" {
+		if strings.TrimSpace(p) == "" {
 			continue
 		}
 		if !strings.HasPrefix(p, "@") {
@@ -42,8 +41,9 @@ func readPatternFile(path string) ([]string, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := sc.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
 			continue
 		}
 		lines = append(lines, line)

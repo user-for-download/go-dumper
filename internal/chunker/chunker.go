@@ -2,6 +2,7 @@ package chunker
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,9 @@ func New(opts Options) (*Chunker, error) {
 	if opts.Prefix == "" {
 		opts.Prefix = "dump"
 	}
+	if opts.Prefix == "." || opts.Prefix == ".." || filepath.Base(opts.Prefix) != opts.Prefix || strings.ContainsAny(opts.Prefix, `/\\`) {
+		return nil, errors.New("Prefix must be a filename component")
+	}
 	return &Chunker{opts: opts}, nil
 }
 
@@ -47,19 +51,25 @@ func (c *Chunker) ensureOpen() error {
 
 func (c *Chunker) openNew() error {
 	if c.bw != nil {
-		_ = c.bw.Flush()
+		if err := c.bw.Flush(); err != nil {
+			return fmt.Errorf("flush: %w", err)
+		}
+		c.bw = nil
 	}
 	if c.current != nil {
-		_ = c.current.Close()
+		if err := c.current.Close(); err != nil {
+			return fmt.Errorf("close: %w", err)
+		}
+		c.current = nil
 	}
-	c.chunkIdx++
+	nextIdx := c.chunkIdx + 1
 	ext := c.opts.Extension
 	if ext == "" {
 		ext = ".txt"
 	} else if !strings.HasPrefix(ext, ".") {
 		ext = "." + ext
 	}
-	name := fmt.Sprintf("%s_%05d%s", c.opts.Prefix, c.chunkIdx, ext)
+	name := fmt.Sprintf("%s_%05d%s", c.opts.Prefix, nextIdx, ext)
 	path := filepath.Join(c.opts.OutputDir, name)
 	f, err := os.Create(path)
 	if err != nil {
@@ -67,6 +77,7 @@ func (c *Chunker) openNew() error {
 	}
 	c.current = f
 	c.bw = bufio.NewWriterSize(f, 64*1024)
+	c.chunkIdx = nextIdx
 	c.curSymbols = 0
 	return nil
 }
@@ -76,8 +87,11 @@ func (c *Chunker) WriteString(s string) error {
 }
 
 func (c *Chunker) WriteBytes(b []byte, runes int) error {
-	if len(b) == 0 || runes == 0 {
+	if len(b) == 0 {
 		return nil
+	}
+	if runes != util.RuneCount(string(b)) {
+		return fmt.Errorf("rune count mismatch: got %d, want %d", runes, util.RuneCount(string(b)))
 	}
 	return c.writeInternal(string(b), runes)
 }

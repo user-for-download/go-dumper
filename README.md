@@ -13,8 +13,8 @@ $ dumper --path ./myproject --output ./dump_out
 - **Type filter** — filter files by extension (`--type go` only includes `.go` files)
 - **`@file` syntax** — load patterns from a file, one per line
 - **Rune-aware chunking** — respects Unicode codepoints (not bytes) for LLM context windows
-- **Comment stripping** — removes line and block comments (token-unaware; use with caution)
-- **Output formats** — `plain`, `markdown`, or `xml`
+- **Raw file dump** — preserves file bytes without language or comment parsing
+- **Output formats** — `plain` text or `markdown`
 - **Project tree** — optionally prepend an ASCII tree of your project, either full (`--tree-mode full`) or filtered to match what was dumped (`--tree-mode include`)
 - **Auto-exclusions** — the output directory and the dumper binary itself are always excluded
 - **Clean output** — optionally clean the output folder before writing (`--clean`)
@@ -56,9 +56,6 @@ go install ./cmd/dumper
 # Markdown output, include project tree (filtered to match dumped files)
 ./dumper --format markdown --tree --tree-mode include
 
-# Strip comments (line and block)
-./dumper --clear --clear-mode line_and_block
-
 # Parallel reading
 ./dumper --concurrency 4
 
@@ -87,7 +84,15 @@ go install ./cmd/dumper
   "path": ".",
   "output": "./dump_out",
   "include": ["**/*"],
-  "exclude": [],
+  "exclude": [
+    ".git/**", "**/.git/**",
+    "node_modules/**", "**/node_modules/**",
+    "vendor/**", "**/vendor/**",
+    "dist/**", "**/dist/**",
+    "build/**", "**/build/**",
+    "target/**", "**/target/**",
+    "coverage/**", "**/coverage/**"
+  ],
   "type": [],
   "clean": false,
   "max_symbols": 1000000,
@@ -99,10 +104,6 @@ go install ./cmd/dumper
   "concurrency": 1,
   "exclude_self": true,
   "format": "plain",
-  "clear": {
-    "enabled": false,
-    "mode": "line"
-  },
   "tree": {
     "enabled": true,
     "format": "ascii",
@@ -136,9 +137,7 @@ JSON defaults → config file → CLI flags. Each level overrides the previous.
 | `--tree` | Prepend project tree to output |
 | `--tree-mode full|include` | `full` = all files; `include` = only matched files |
 | `--tree-depth` | Max tree depth (0 = unlimited) |
-| `--format plain|markdown|xml` | Output format |
-| `--clear` | Strip comments |
-| `--clear-mode line|line_and_block` | Comment stripping mode |
+| `--format plain|markdown` | Output format |
 | `--concurrency N` | Parallel readers (default: 1) |
 | `--exclude-self` | Auto-skip the dumper binary (default: true) |
 | `--include-hidden` | Include dotfiles/dirs (default: false) |
@@ -164,10 +163,6 @@ Any `--include` or `--exclude` value that starts with `@` is treated as a path t
 
 Lines starting with `#` and blank lines are ignored.
 
-## Comment Stripping
-
-The comment stripper is token-unaware. It may corrupt strings that contain comment markers (e.g., `"https://example.com"`). For accurate parsing, use language-specific parsers. **Keep `clear.enabled: false` for sensitive code.**
-
 ## Output Format Examples
 
 ### Plain (default)
@@ -191,7 +186,7 @@ func main() {}
 
 ## `src/main.go`
 
-```go
+```
 package main
 func main() {}
 ```
@@ -199,20 +194,6 @@ func main() {}
 ## `README.md`
 
 # My Project
-```
-
-### XML
-
-```xml
-<dump>
-<file path="src/main.go"><![CDATA[
-package main
-func main() {}
-]]></file>
-<file path="README.md"><![CDATA[
-# My Project
-]]></file>
-</dump>
 ```
 
 ## Architecture

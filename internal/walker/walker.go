@@ -1,6 +1,7 @@
 package walker
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -46,14 +47,18 @@ func New(opts Options) (*Walker, error) {
 }
 
 func normalizePatterns(patterns []string) []string {
-	normalized := make([]string, len(patterns))
-	for i, p := range patterns {
-		normalized[i] = filepath.ToSlash(strings.TrimSpace(p))
+	normalized := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		p = filepath.ToSlash(p)
+		if p != "" {
+			normalized = append(normalized, p)
+		}
 	}
 	return normalized
 }
 
 func (w *Walker) Collect() ([]Entry, error) {
+	w.errors = nil
 	var result []Entry
 	root := w.opts.Root
 	seen := make(map[string]struct{})
@@ -69,6 +74,9 @@ func (w *Walker) Collect() ([]Entry, error) {
 			return nil
 		}
 		name := d.Name()
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 
 		isRoot := false
 		absPath, absErr := filepath.Abs(path)
@@ -82,15 +90,11 @@ func (w *Walker) Collect() ([]Entry, error) {
 			return nil
 		}
 		if d.IsDir() {
-			// Check if this directory matches any exclude pattern.
-			// If so, skip the entire subtree instead of descending into it.
 			dirRel, dirErr := filepath.Rel(absRoot, absPath)
 			if dirErr == nil {
-				dirSlash := filepath.ToSlash(dirRel)
-				for _, exc := range w.opts.Excludes {
-					// Match the directory itself (e.g. "**/node_modules")
-					// or any file inside it (e.g. "**/node_modules/**").
-					if matchPattern(exc, dirSlash) || matchPattern(exc, dirSlash+"/**") {
+				dirRel = filepath.ToSlash(dirRel)
+				for _, exclude := range w.opts.Excludes {
+					if matchPattern(exclude, dirRel) || matchPattern(exclude, dirRel+"/") || matchPattern(exclude, dirRel+"/**") {
 						return filepath.SkipDir
 					}
 				}
@@ -149,6 +153,9 @@ func (w *Walker) Collect() ([]Entry, error) {
 		}
 		matches, _ := doublestar.FilepathGlob(pat)
 		for _, match := range matches {
+			if info, err := os.Lstat(match); err != nil || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
 			absMatch, absErr := filepath.Abs(match)
 			if absErr != nil {
 				absMatch = match
@@ -183,10 +190,18 @@ func (w *Walker) Collect() ([]Entry, error) {
 			}
 			rel = filepath.ToSlash(rel)
 
-			if !w.matchAny(w.opts.Includes, rel) {
+			matchTarget := rel
+			if filepath.IsAbs(inc) {
+				matchTarget = filepath.ToSlash(absMatch)
+			}
+			if !w.matchAny([]string{inc}, matchTarget) {
 				continue
 			}
-			if w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel) {
+			excluded := w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel)
+			if filepath.IsAbs(inc) && !hasWildcard(inc) {
+				excluded = false
+			}
+			if excluded {
 				continue
 			}
 			if len(w.opts.Type) > 0 {
@@ -212,7 +227,7 @@ func (w *Walker) Collect() ([]Entry, error) {
 	}
 
 	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
-	return result, nil
+	return result, errors.Join(w.errors...)
 }
 
 func (w *Walker) Errors() []error {

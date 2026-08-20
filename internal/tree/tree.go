@@ -31,7 +31,8 @@ type Options struct {
 	// AllowedFiles is an optional list of pre-collected file paths (from the
 	// walker) for ModeInclude. When set, the tree is built from these paths
 	// instead of re-walking the filesystem.
-	AllowedFiles []string
+	AllowedFiles    []string
+	AllowedFilesSet bool
 }
 
 func (o *Options) mode() Mode {
@@ -54,7 +55,7 @@ func Generate(opts Options) (string, error) {
 
 	var allowed map[string]struct{}
 	if opts.mode() == ModeInclude {
-		if len(opts.AllowedFiles) > 0 {
+		if opts.AllowedFilesSet || len(opts.AllowedFiles) > 0 {
 			allowed = make(map[string]struct{}, len(opts.AllowedFiles))
 			absRoot, _ := filepath.Abs(opts.Root)
 			for _, p := range opts.AllowedFiles {
@@ -88,6 +89,9 @@ func collectAllowed(opts Options) (map[string]struct{}, error) {
 	set := make(map[string]struct{})
 	err := filepath.WalkDir(opts.Root, func(path string, d os.DirEntry, werr error) error {
 		if werr != nil {
+			return werr
+		}
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 

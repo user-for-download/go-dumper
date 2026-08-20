@@ -10,8 +10,7 @@ internal/app/          Orchestration: pipeline wiring
 internal/config/        Config loading, defaults, CLI overrides, validation
 internal/walker/       Filesystem traversal with glob filtering
 internal/chunker/      Rune-aware output file splitting
-internal/cleaner/      Language-aware comment stripping
-internal/format/       Output formatters (plain, markdown, xml)
+internal/format/       Output formatters (plain, markdown)
 internal/tree/         ASCII project tree generation
 internal/util/         Binary file detection
 internal/stats/        Thread-safe counters + JSON export
@@ -38,8 +37,7 @@ CLI (main.go)
             │   └─> uses same includes/excludes for ModeInclude filtering
             │
             ├─> for each text file:
-            │   ├─> renderFile()     — header + content + footer
-            │   ├─> cleaner.Stream() — optional comment stripping
+            │   ├─> renderFile()     — raw file content
             │   └─> chunker.WriteString/WriteBytes — split into chunks
             │
             └─> stats.WriteJSON()  — optional stats export
@@ -122,8 +120,7 @@ The `--clean` flag removes the output directory before writing. This is useful f
 - `output` must not be the same as `path` (using `filepath.Abs` comparison)
 - `max_symbols` must be > 0
 - `concurrency` must be >= 1
-- `format` must be one of: `plain`, `markdown`, `xml`
-- `clear.mode` must be one of: `line`, `line_and_block`
+- `format` must be one of: `plain`, `markdown`
 - `tree.mode` must be one of: `full`, `include`
 - `tree.max_depth` must be >= 0
 - `tree.format` must be `ascii`
@@ -141,23 +138,11 @@ When `tree.mode: "include"`, the tree generation uses the same include/exclude p
 
 `@file` syntax is expanded in one place: `walker.ExpandPatterns()`. This is called once in `app.Run()` and once in `main.go` (dry-run), producing expanded pattern lists that are passed to both the walker and the tree generator. This ensures tree include mode sees the same effective patterns as the walker.
 
-### Comment Stripping
-
-The cleaner (`stripLine()`) is a single-pass state machine per line. It handles:
-- Shebang lines (`#!`) — preserved
-- Line comments (`//`, `#`, `--`, etc.) — truncated
-- Block comments (`/* */`, `<!-- -->`) — removed, with mid-line close + code-after handling
-- Multi-line block comment spans
-- Blank lines inside block comments — suppressed (not leaked to output)
-
-The cleaner is **token-unaware** — it does not track whether `//` or `/*` appears inside a string literal. This is documented and acceptable for a dumper tool. Future work: integrate language-specific parsers (e.g., `go/scanner` for Go) for `--clear-mode=ast`.
-
 ### Format Plug
 
-`format.Formatter` is an interface with three implementations:
+`format.Formatter` is an interface with two implementations:
 - `plainFmt` — `===== FILE: path =====` markers
-- `markdownFmt` — fenced code blocks with language hints from `langFromPath()`
-- `xmlFmt` — `<file path="..."><![CDATA[...]]></file>`
+- `markdownFmt` — raw fenced code blocks without language detection
 
 `format.New()` validates the format name and returns an error for unknown values.
 
@@ -181,19 +166,17 @@ In concurrent mode, when a write error occurs, the worker pool is cancelled. The
 
 1. `util.SniffBinary()` briefly opens the file, reads up to 8KB to detect binary content or null bytes, and immediately closes it to prevent file descriptor leaks.
 2. If text, the file path is added to a processing queue.
-3. Later, `renderFile()` opens the file from scratch, streams it through the cleaner (comment stripper), and defers the close.
+3. Later, `renderFile()` opens the file from scratch, copies raw bytes to the formatter/chunker, and defers the close.
 4. This ensures only a controlled number of files (bounded by the `--concurrency` setting) are ever held open simultaneously.
 
 ## Testing Strategy
 
-- **Unit tests** for: chunker (rune counting, rotation, splitting), cleaner (comment removal, edge cases), walker (glob matching, symlink cycle detection), tree (ModeFull/ModeInclude), config (validation)
+- **Unit tests** for: chunker (rune counting, rotation, splitting), walker (glob matching and directory pruning), tree (ModeFull/ModeInclude), config (validation)
 - **E2E tests** (`app_e2e_test.go`): full pipeline including reassembly fidelity (chunked output joined must equal canonical single-chunk output), binary skipping, concurrency ordering, tree content, output directory auto-exclusion
 - Re-assembly invariant: two runs with `MaxSymbols=50` (split) and `MaxSymbols=1_000_000` (canonical) must produce byte-identical joined output
 
 ## Known Limitations
 
-1. **Cleaner is token-unaware** — may corrupt strings containing `//` or `/*`
-2. **No deduplication** — identical files (by path) could appear twice if the filesystem presents them twice
-3. **Tree generation is not concurrency-safe with walker errors** — tree independently re-walks the filesystem; if files change between walks, tree and content may disagree
-4. **`Concurrency > 1` is not byte-for-byte reproducible** — parallel reads have non-deterministic timing; use `--concurrency 1` for reproducible output
-5. **No symlink cycle detection** — `filepath.WalkDir` does not follow symlinks; cycles via symlinks are not detected
+1. **No deduplication** — identical files (by path) could appear twice if the filesystem presents them twice
+2. **Tree generation is not concurrency-safe with walker errors** — tree independently re-walks the filesystem; if files change between walks, tree and content may disagree
+3. **`Concurrency > 1` is not byte-for-byte reproducible** — parallel reads have non-deterministic timing; use `--concurrency 1` for reproducible output

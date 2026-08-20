@@ -297,3 +297,61 @@ func TestWalker_WithAtFile(t *testing.T) {
 		t.Errorf("got %v, want %v", names, want)
 	}
 }
+
+func TestWalker_AbsoluteInclude(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "main.go")
+	writeFile(t, target, "package main")
+	w, err := New(Options{Root: root, Includes: []string{target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Path != target {
+		t.Fatalf("got %#v, want %s", entries, target)
+	}
+}
+
+func TestWalker_SkipsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	writeFile(t, outside, "secret")
+	if err := os.Symlink(outside, filepath.Join(root, "secret.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	w, err := New(Options{Root: root, Includes: []string{"**/*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("symlink should be skipped: %#v", entries)
+	}
+}
+
+func TestWalker_PrunesExcludedDirectories(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "node_modules", "dep", "index.js"), "dependency")
+	writeFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	w, err := New(Options{
+		Root:     root,
+		Includes: []string{"**/*"},
+		Excludes: []string{"node_modules/**"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || filepath.Base(entries[0].Path) != "main.go" {
+		t.Fatalf("excluded directory was traversed or included: %#v", entries)
+	}
+}

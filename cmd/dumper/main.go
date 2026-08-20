@@ -21,8 +21,7 @@ Pattern files (@file syntax)
 
 Output format
   --format plain      Original "===== FILE: path =====" markers (default).
-  --format markdown   Each file rendered as a fenced code block with a heading.
-  --format xml        XML-ish <file path="..."><![CDATA[ ... ]]></file>.
+  --format markdown   Each file rendered as a raw fenced block with a heading.
 
 Tree mode
   --tree-mode full     Show every file in the project tree (default).
@@ -32,11 +31,6 @@ Tree mode
 Safety
   --exclude-self (on by default) auto-excludes the running binary if it is
   located inside the scan root, so dumper never tries to embed itself.
-
-Comment stripping (--clear)
-  The comment stripper is token-unaware and may corrupt strings that contain
-  comment markers (e.g., "https://example.com"). For accurate parsing, use a
-  language-specific parser.
 
 Concurrency
   When --concurrency > 1, file reads run in parallel. Output order is
@@ -49,10 +43,10 @@ func main() {
 		dryRun  bool
 		verbose bool
 
-		fPath, fOutput, fChunkPrefix, fClearMode, fStatsFile, fFormat, fTreeMode string
-		fInclude, fExclude, fType                                                []string
-		fMaxSymbols, fTreeDepth, fConcurrency                                    int
-		fSplit, fProgress, fClear, fTree, fExcludeSelf, fIncludeHidden, fClean   bool
+		fPath, fOutput, fChunkPrefix, fStatsFile, fFormat, fTreeMode   string
+		fInclude, fExclude, fType                                      []string
+		fMaxSymbols, fTreeDepth, fConcurrency                          int
+		fSplit, fProgress, fTree, fExcludeSelf, fIncludeHidden, fClean bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -101,12 +95,6 @@ func main() {
 			}
 			if c.Flags().Changed("stats-file") {
 				o.StatsFile = &fStatsFile
-			}
-			if c.Flags().Changed("clear") {
-				o.ClearEnabled = &fClear
-			}
-			if c.Flags().Changed("clear-mode") {
-				o.ClearMode = &fClearMode
 			}
 			if c.Flags().Changed("tree") {
 				o.TreeEnabled = &fTree
@@ -190,8 +178,6 @@ func main() {
 	rootCmd.Flags().IntVarP(&fMaxSymbols, "max-symbols", "m", 1_000_000, "max runes per chunk")
 	rootCmd.Flags().StringVar(&fChunkPrefix, "chunk-prefix", "dump", "chunk file prefix")
 	rootCmd.Flags().BoolVar(&fSplit, "split-long-lines", false, "split oversized lines")
-	rootCmd.Flags().BoolVar(&fClear, "clear", false, "strip comments")
-	rootCmd.Flags().StringVar(&fClearMode, "clear-mode", "line", "line|line_and_block")
 	rootCmd.Flags().BoolVar(&fTree, "tree", false, "prepend project tree")
 	rootCmd.Flags().IntVar(&fTreeDepth, "tree-depth", 0, "max tree depth")
 	rootCmd.Flags().StringVar(&fTreeMode, "tree-mode", "full",
@@ -204,7 +190,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&fIncludeHidden, "include-hidden", false,
 		"include files and directories starting with .")
 	rootCmd.Flags().StringVar(&fFormat, "format", "plain",
-		"output format: plain | markdown | xml")
+		"output format: plain | markdown")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list files only")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "verbose logging")
 

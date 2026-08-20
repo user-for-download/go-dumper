@@ -338,3 +338,17 @@ func TestChunker_WriteBytes_RuneCount(t *testing.T) {
 		t.Errorf("rune count should be 7")
 	}
 }
+
+func TestChunker_RejectsPathPrefix(t *testing.T) {
+	_, err := New(Options{OutputDir: t.TempDir(), Prefix: "../escape", MaxSymbols: 10})
+	if err == nil {
+		t.Fatal("expected path prefix to be rejected")
+	}
+}
+
+func TestChunker_WriteBytesRejectsWrongRuneCount(t *testing.T) {
+	c, _ := newTestChunker(t, 100)
+	if err := c.WriteBytes([]byte("hello"), 0); err == nil {
+		t.Fatal("expected rune count mismatch")
+	}
+}

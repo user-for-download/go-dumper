@@ -1,14 +1,13 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"path/filepath"
+	"io"
+	"os"
 	"sync"
 
 	"github.com/user-for-download/go-dumper/internal/chunker"
-	"github.com/user-for-download/go-dumper/internal/cleaner"
 	"github.com/user-for-download/go-dumper/internal/format"
 	"github.com/user-for-download/go-dumper/internal/progress"
 	"github.com/user-for-download/go-dumper/internal/stats"
@@ -24,13 +23,18 @@ type result struct {
 	index      int
 	path       string
 	render     renderResult
-	payload    []byte
+	payload    string
 	processErr error
 }
 
-func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode cleaner.Mode, fmtr format.Formatter, st *stats.Stats, rep *progress.Reporter, workers int) error {
+func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr format.Formatter, st *stats.Stats, rep *progress.Reporter, workers int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	tempDir, err := os.MkdirTemp("", "dumper-render-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
 
 	jobs := make(chan job, workers*2)
 	results := make(chan result, workers*2)
@@ -63,23 +67,43 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 				} else {
 					rel := toRel(root, j.sf.path)
 
-					var buf bytes.Buffer
-					buf.WriteString(fmtr.FileHeader(rel))
+					tmp, terr := os.CreateTemp(tempDir, "render-*")
+					if terr != nil {
+						f.Close()
+						r.processErr = terr
+						select {
+						case results <- r:
+						case <-ctx.Done():
+							return
+						}
+						continue
+					}
+					_, terr = tmp.WriteString(fmtr.FileHeader(rel))
 
-					bytes, runes, cerr := renderFile(f, filepath.Ext(j.sf.path), mode, fmtr, func(line string) error {
-						_, werr := buf.WriteString(line)
+					bytes, runes, cerr := renderFile(f, func(line string) error {
+						_, werr := tmp.WriteString(line)
 						return werr
 					})
 					f.Close()
-					if cerr != nil {
-						r.processErr = cerr
-					} else {
+					if terr == nil && cerr == nil {
 						if footer := fmtr.FileFooter(rel); footer != "" {
-							buf.WriteString(footer)
+							_, terr = tmp.WriteString(footer)
 						}
+					}
+					if closeErr := tmp.Close(); terr == nil {
+						terr = closeErr
+					}
+					if terr != nil || cerr != nil {
+						os.Remove(tmp.Name())
+						if terr != nil {
+							r.processErr = terr
+						} else {
+							r.processErr = cerr
+						}
+					} else {
 						r.render.bytes = bytes
 						r.render.runes = runes
-						r.payload = buf.Bytes()
+						r.payload = tmp.Name()
 					}
 				}
 
@@ -116,13 +140,23 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 				if errors.Is(cur.processErr, ErrBinaryFile) {
 					st.AddSkipped(cur.path, stats.ReasonBinary, nil)
 				} else {
-					st.AddError(cur.path + ": " + cur.processErr.Error())
+					st.AddSkipped(cur.path, stats.ReasonError, cur.processErr)
 				}
 				rep.FinishFile()
 				finishedCount++
 				continue
 			}
-			if err := ch.WriteBytes(cur.payload, int(cur.render.runes)); err != nil {
+			payload, err := os.Open(cur.payload)
+			if err == nil {
+				err = copyPayload(payload, ch.WriteString)
+			}
+			if payload != nil {
+				if closeErr := payload.Close(); err == nil {
+					err = closeErr
+				}
+			}
+			os.Remove(cur.payload)
+			if err != nil {
 				writeErr = err
 				cancel()
 				rep.FinishFile()
@@ -141,4 +175,22 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, mode c
 		return writeErr
 	}
 	return nil
+}
+
+func copyPayload(f *os.File, write func(string) error) error {
+	buf := make([]byte, 64*1024)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if werr := write(string(buf[:n])); werr != nil {
+				return werr
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
 }

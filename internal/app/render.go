@@ -3,12 +3,11 @@ package app
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/user-for-download/go-dumper/internal/cleaner"
-	"github.com/user-for-download/go-dumper/internal/format"
 	"github.com/user-for-download/go-dumper/internal/util"
 )
 
@@ -35,28 +34,40 @@ type renderResult struct {
 	runes  int64
 }
 
-// renderFile streams pre-opened file content through the cleaner into
-// writeLine, applying the formatter's EscapeBody to each line before counting
-// and writing. The caller is responsible for sniffing binary and writing
-// header/footer. Returns byte and rune counts of the escaped output.
-func renderFile(f *os.File, ext string, mode cleaner.Mode, fmtr format.Formatter, writeLine func(string) error) (bytes int64, runes int64, err error) {
-	if err := cleaner.Stream(f, ext, mode, func(line string) error {
-		escaped := fmtr.EscapeBody(line)
-		bytes += int64(len(escaped))
-		runes += int64(util.RuneCount(escaped))
-		return writeLine(escaped)
-	}); err != nil {
-		return 0, 0, fmt.Errorf("clean: %w", err)
+type outputError struct {
+	err error
+}
+
+func (e *outputError) Error() string { return e.err.Error() }
+func (e *outputError) Unwrap() error { return e.err }
+
+func renderFile(f *os.File, writeLine func(string) error) (bytes int64, runes int64, err error) {
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			line := string(buf[:n])
+			bytes += int64(n)
+			runes += int64(util.RuneCount(line))
+			if err := writeLine(line); err != nil {
+				return 0, 0, &outputError{err: err}
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return bytes, runes, nil
+			}
+			return 0, 0, fmt.Errorf("read: %w", readErr)
+		}
 	}
-	return bytes, runes, nil
 }
 
 func autoExcludeOutput(root string, output string, excludes []string) []string {
-	absRoot, err := filepath.Abs(root)
+	absRoot, err := canonicalPath(root)
 	if err != nil {
 		return excludes
 	}
-	absOut, err := filepath.Abs(output)
+	absOut, err := canonicalPath(output)
 	if err != nil {
 		return excludes
 	}
@@ -71,6 +82,39 @@ func autoExcludeOutput(root string, output string, excludes []string) []string {
 	}
 
 	return append(excludes, rel+"/**")
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var suffix []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs), nil
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func outputContainsRoot(root, output string) bool {
+	absRoot, rootErr := canonicalPath(root)
+	absOutput, outputErr := canonicalPath(output)
+	if rootErr != nil || outputErr != nil {
+		return true
+	}
+	rel, err := filepath.Rel(absOutput, absRoot)
+	return err == nil && (rel == "." || (rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))))
 }
 
 func autoExcludeSelf(cfgPath string, excludes []string, excludeSelf bool) []string {

@@ -85,6 +85,8 @@ func (s *Stats) Finish(chunks int) {
 func (s *Stats) WriteJSON(path string) error {
 	s.mu.Lock()
 	cp := s.data
+	cp.Skipped = append([]SkippedFile(nil), s.data.Skipped...)
+	cp.Errors = append([]string(nil), s.data.Errors...)
 	s.mu.Unlock()
 	data, err := json.MarshalIndent(cp, "", "  ")
 	if err != nil {

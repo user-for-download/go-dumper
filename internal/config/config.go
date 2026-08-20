@@ -6,12 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
-
-type ClearConfig struct {
-	Enabled bool   `json:"enabled"`
-	Mode    string `json:"mode"`
-}
 
 type TreeConfig struct {
 	Enabled      bool   `json:"enabled"`
@@ -22,33 +18,43 @@ type TreeConfig struct {
 }
 
 type Config struct {
-	Path           string      `json:"path"`
-	Output         string      `json:"output"`
-	Include        []string    `json:"include"`
-	Exclude        []string    `json:"exclude"`
-	Type           []string    `json:"type"`
-	Clean          bool        `json:"clean"`
-	MaxSymbols     int         `json:"max_symbols"`
-	ChunkPrefix    string      `json:"chunk_prefix"`
-	SplitLongLines bool        `json:"split_long_lines"`
-	Progress       bool        `json:"progress"`
-	StatsFile      string      `json:"stats_file"`
-	IncludeHidden  bool        `json:"include_hidden"`
-	Concurrency    int         `json:"concurrency"`
-	ExcludeSelf    bool        `json:"exclude_self"`
-	Format         string      `json:"format"`
-	Clear          ClearConfig `json:"clear"`
-	Tree           TreeConfig  `json:"tree"`
+	Path           string     `json:"path"`
+	Output         string     `json:"output"`
+	Include        []string   `json:"include"`
+	Exclude        []string   `json:"exclude"`
+	Type           []string   `json:"type"`
+	Clean          bool       `json:"clean"`
+	MaxSymbols     int        `json:"max_symbols"`
+	ChunkPrefix    string     `json:"chunk_prefix"`
+	SplitLongLines bool       `json:"split_long_lines"`
+	Progress       bool       `json:"progress"`
+	StatsFile      string     `json:"stats_file"`
+	IncludeHidden  bool       `json:"include_hidden"`
+	Concurrency    int        `json:"concurrency"`
+	ExcludeSelf    bool       `json:"exclude_self"`
+	Format         string     `json:"format"`
+	Tree           TreeConfig `json:"tree"`
 }
 
 func defaults() *Config {
 	return &Config{
-		Path:        ".",
-		Output:      "./dump_out",
-		Include:     []string{"**/*"},
+		Path:    ".",
+		Output:  "./dump_out",
+		Include: []string{"**/*"},
+		Exclude: []string{
+			".git/**", "**/.git/**",
+			"node_modules/**", "**/node_modules/**",
+			"vendor/**", "**/vendor/**",
+			"dist/**", "**/dist/**",
+			"build/**", "**/build/**",
+			"target/**", "**/target/**",
+			"out/**", "**/out/**",
+			"coverage/**", "**/coverage/**",
+			".next/**", "**/.next/**",
+			".cache/**", "**/.cache/**",
+		},
 		MaxSymbols:  1_000_000,
 		ChunkPrefix: "dump",
-		Clear:       ClearConfig{Enabled: false, Mode: "line"},
 		Tree:        TreeConfig{Enabled: false, Format: "ascii", MaxDepth: 0, IncludeSizes: true, Mode: "full"},
 		Concurrency: 1,
 		ExcludeSelf: true,
@@ -91,9 +97,6 @@ func (c *Config) normalize() {
 	if c.ChunkPrefix == "" {
 		c.ChunkPrefix = "dump"
 	}
-	if c.Clear.Mode == "" {
-		c.Clear.Mode = "line"
-	}
 	if c.Tree.Format == "" {
 		c.Tree.Format = "ascii"
 	}
@@ -109,12 +112,40 @@ func (c *Config) normalize() {
 }
 
 func samePath(a, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
+	absA, errA := canonicalPath(a)
+	absB, errB := canonicalPath(b)
 	if errA != nil || errB != nil {
 		return false
 	}
 	return filepath.Clean(absA) == filepath.Clean(absB)
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var suffix []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs), nil
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func pathContains(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (c *Config) Validate() error {
@@ -124,8 +155,19 @@ func (c *Config) Validate() error {
 	if c.Output == "" {
 		return errors.New("output must not be empty")
 	}
+	absPath, pathErr := canonicalPath(c.Path)
+	absOutput, outputErr := canonicalPath(c.Output)
+	if pathErr != nil || outputErr != nil {
+		return errors.New("path and output must be valid filesystem paths")
+	}
 	if samePath(c.Path, c.Output) {
 		return errors.New("output directory must not be the same as path")
+	}
+	if pathContains(absOutput, absPath) {
+		return errors.New("output directory must not contain path")
+	}
+	if filepath.Clean(absOutput) == string(filepath.Separator) {
+		return errors.New("output directory must not be the filesystem root")
 	}
 	if c.MaxSymbols <= 0 {
 		return errors.New("max_symbols must be > 0")
@@ -134,14 +176,9 @@ func (c *Config) Validate() error {
 		return errors.New("concurrency must be >= 1")
 	}
 	switch c.Format {
-	case "plain", "markdown", "xml":
+	case "plain", "markdown":
 	default:
-		return errors.New("format must be one of: plain, markdown, xml")
-	}
-	switch c.Clear.Mode {
-	case "", "line", "line_and_block":
-	default:
-		return errors.New("clear.mode must be one of: line, line_and_block")
+		return errors.New("format must be one of: plain, markdown")
 	}
 	switch c.Tree.Mode {
 	case "", "full", "include":
@@ -174,8 +211,6 @@ type CLIOverrides struct {
 	SplitLongLines *bool
 	Progress       *bool
 	StatsFile      *string
-	ClearEnabled   *bool
-	ClearMode      *string
 	TreeEnabled    *bool
 	TreeDepth      *int
 	TreeMode       *string
@@ -218,12 +253,6 @@ func (c *Config) MergeCLI(o CLIOverrides) error {
 	}
 	if o.StatsFile != nil {
 		c.StatsFile = *o.StatsFile
-	}
-	if o.ClearEnabled != nil {
-		c.Clear.Enabled = *o.ClearEnabled
-	}
-	if o.ClearMode != nil {
-		c.Clear.Mode = *o.ClearMode
 	}
 	if o.TreeEnabled != nil {
 		c.Tree.Enabled = *o.TreeEnabled
