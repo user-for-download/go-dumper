@@ -37,6 +37,9 @@ Concurrency
   preserved, but byte-for-byte reproducibility across runs is not guaranteed.
   Use --concurrency 1 for deterministic output.`
 
+// version is injected at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	var (
 		cfgPath string
@@ -50,9 +53,10 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "dumper",
-		Short: "Project text dumper",
-		Long:  longHelp,
+		Use:     "dumper",
+		Short:   "Project text dumper",
+		Long:    longHelp,
+		Version: version,
 		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := config.Load(cfgPath, c.Flags().Changed("config"))
 			if err != nil {
