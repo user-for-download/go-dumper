@@ -80,7 +80,7 @@ func TestGenerate_Sizes(t *testing.T) {
 func TestGenerate_NotADirectory(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "file.txt")
-	os.WriteFile(file, []byte("content"), 0o644)
+	_ = os.WriteFile(file, []byte("content"), 0o644)
 
 	_, err := Generate(Options{Root: file})
 	if err == nil {
@@ -106,8 +106,8 @@ func TestGenerate_DeepHierarchy(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		deep = filepath.Join(deep, "level"+string(rune('0'+i)))
 	}
-	os.MkdirAll(deep, 0o755)
-	os.WriteFile(filepath.Join(deep, "deep.go"), []byte("package deep\n"), 0o644)
+	_ = os.MkdirAll(deep, 0o755)
+	_ = os.WriteFile(filepath.Join(deep, "deep.go"), []byte("package deep\n"), 0o644)
 
 	out, err := Generate(Options{Root: root, MaxDepth: 3})
 	if err != nil {
@@ -123,10 +123,10 @@ func TestGenerate_DeepHierarchy(t *testing.T) {
 
 func TestGenerate_Sorting(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "z_dir"), 0o755)
-	os.MkdirAll(filepath.Join(root, "a_dir"), 0o755)
-	os.WriteFile(filepath.Join(root, "z_file.txt"), []byte("z"), 0o644)
-	os.WriteFile(filepath.Join(root, "a_file.txt"), []byte("a"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "z_dir"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "a_dir"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "z_file.txt"), []byte("z"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "a_file.txt"), []byte("a"), 0o644)
 
 	out, err := Generate(Options{Root: root})
 	if err != nil {
@@ -316,7 +316,7 @@ func TestRootDisplayName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(old)
+	defer func() { _ = os.Chdir(old) }()
 	if err := os.Chdir(tmp); err != nil {
 		t.Fatal(err)
 	}

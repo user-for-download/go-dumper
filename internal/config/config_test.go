@@ -100,7 +100,7 @@ func TestNormalize_EmptyTreeModeToFull(t *testing.T) {
 func TestMergeCLI_AppliesIncludeHidden(t *testing.T) {
 	cfg := defaults()
 	hide := true
-	cfg.MergeCLI(CLIOverrides{IncludeHidden: &hide})
+	_ = cfg.MergeCLI(CLIOverrides{IncludeHidden: &hide})
 	if !cfg.IncludeHidden {
 		t.Error("IncludeHidden should be true after merge")
 	}
@@ -177,11 +177,11 @@ func TestLoad_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.WriteString("invalid json"); err != nil {
 		t.Fatal(err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	_, err = Load(tmp.Name(), false)
 	if err == nil {

@@ -22,9 +22,55 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────
-  # Tests
+  # Tests (Linux, macOS, Windows)
   # ─────────────────────────────────────
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+
+      # Formatting / vet / mod-tidy checks are identical everywhere;
+      # run them once on Linux.
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Vet
+        if: runner.os == 'Linux'
+        run: go vet ./...
+
+      # The race detector is not supported on Windows without a C toolchain,
+      # so Windows runs the plain suite.
+      - name: Run tests (race)
+        if: runner.os != 'Windows'
+        run: go test -race ./...
+
+      - name: Run tests
+        if: runner.os == 'Windows'
+        run: go test ./...
+
+      - name: Check go mod tidy
+        if: runner.os == 'Linux'
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # ─────────────────────────────────────
+  # Lint
+  # ─────────────────────────────────────
+  lint:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,29 +82,22 @@ jobs:
           go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
 
-      - name: Check formatting
-        run: |
-          test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Run tests
-        run: go test -race -v ./...
-
-      - name: Check go mod tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
 
   # ─────────────────────────────────────
   # Build release binaries
   # Runs for tag pushes and manual dispatch
   # ─────────────────────────────────────
   build:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     strategy:
       fail-fast: false
@@ -131,6 +170,12 @@ jobs:
           sha256sum "${BINARY_NAME}-${{ matrix.suffix }}${{ matrix.ext }}" \
             > "${BINARY_NAME}-${{ matrix.suffix }}${{ matrix.ext }}.sha256"
 
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -138,6 +183,7 @@ jobs:
           path: |
             dist/${{ env.BINARY_NAME }}-${{ matrix.suffix }}${{ matrix.ext }}
             dist/${{ env.BINARY_NAME }}-${{ matrix.suffix }}${{ matrix.ext }}.sha256
+          retention-days: 14
 
   # ─────────────────────────────────────
   # Create GitHub Release
@@ -162,6 +208,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate combined checksums
+        shell: bash
+        run: |
+          cat artifacts/*/*.sha256 > artifacts/checksums.txt
+          cat artifacts/checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

@@ -35,7 +35,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	jobs := make(chan job, workers*2)
 	results := make(chan result, workers*2)
@@ -64,13 +64,13 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 					r.processErr = err
 				} else if isBin {
 					r.processErr = ErrBinaryFile
-					f.Close()
+					_ = f.Close()
 				} else {
 					rel := ToRel(root, j.sf.path)
 
 					tmp, terr := os.CreateTemp(tempDir, "render-*")
 					if terr != nil {
-						f.Close()
+						_ = f.Close()
 						r.processErr = terr
 						select {
 						case results <- r:
@@ -85,7 +85,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 						_, werr := tmp.WriteString(line)
 						return werr
 					})
-					f.Close()
+					_ = f.Close()
 					if terr == nil && cerr == nil {
 						if footer := fmtr.FileFooter(rel); footer != "" {
 							_, terr = tmp.WriteString(footer)
@@ -95,7 +95,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 						terr = closeErr
 					}
 					if terr != nil || cerr != nil {
-						os.Remove(tmp.Name())
+						_ = os.Remove(tmp.Name())
 						if terr != nil {
 							r.processErr = terr
 						} else {
@@ -156,7 +156,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 					err = closeErr
 				}
 			}
-			os.Remove(cur.payload)
+			_ = os.Remove(cur.payload)
 			if err != nil {
 				writeErr = err
 				cancel()

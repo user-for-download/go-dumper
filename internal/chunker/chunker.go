@@ -32,13 +32,13 @@ type Chunker struct {
 
 func New(opts Options) (*Chunker, error) {
 	if opts.MaxSymbols <= 0 {
-		return nil, fmt.Errorf("MaxSymbols must be > 0")
+		return nil, errors.New("max symbols must be > 0")
 	}
 	if opts.Prefix == "" {
 		opts.Prefix = "dump"
 	}
 	if opts.Prefix == "." || opts.Prefix == ".." || filepath.Base(opts.Prefix) != opts.Prefix || strings.ContainsAny(opts.Prefix, `/\\`) {
-		return nil, errors.New("Prefix must be a filename component")
+		return nil, errors.New("prefix must be a filename component")
 	}
 	return &Chunker{opts: opts}, nil
 }

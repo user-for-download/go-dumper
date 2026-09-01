@@ -279,7 +279,7 @@ func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, fmtr format.F
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if isBin {
 		return ErrBinaryFile
 	}
