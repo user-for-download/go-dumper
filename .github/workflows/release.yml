@@ -59,7 +59,14 @@ jobs:
 
       - name: Run tests
         if: runner.os == 'Windows'
-        run: go test ./...
+        shell: bash
+        run: |
+          set +e
+          out=$(go test -v ./... 2>&1)
+          code=$?
+          printf '%s\n' "$out" | grep -E '^(--- FAIL|FAIL|panic:)' | while IFS= read -r l; do echo "::error::WINDIAG: $l"; done
+          printf '%s\n' "$out" | tail -60
+          exit $code
 
       - name: Check go mod tidy
         if: runner.os == 'Linux'
