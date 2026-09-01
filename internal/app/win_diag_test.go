@@ -2,31 +2,32 @@ package app
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/user-for-download/go-dumper/internal/walker"
+	"github.com/user-for-download/go-dumper/internal/glob"
 )
 
-// Temporary diagnostic: dump what the walker returns for a temp dir on Windows.
 func TestWinDiagWalkerProbe(t *testing.T) {
 	root := t.TempDir()
 	_ = os.WriteFile(filepath.Join(root, "text.txt"), []byte("hello\n"), 0o644)
-	_ = os.WriteFile(filepath.Join(root, "bin.bin"), []byte{0x7F, 'E', 'L', 'F', 0x00}, 0o644)
+	_ = os.WriteFile(filepath.Join(root, "bm.bin"), []byte{0x7F, 'E', 'L', 'F', 0x00}, 0o644)
 	_ = os.WriteFile(filepath.Join(root, "nested", "deep.txt"), []byte("deep\n"), 0o644)
 
-	w, err := walker.New(walker.Options{Root: root, Includes: []string{"**/*"}})
+	absRoot, _ := filepath.Abs(root)
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
+		rel, rerr := filepath.Rel(absRoot, path)
+		relSlash := filepath.ToSlash(rel)
+		if rerr != nil {
+			relSlash = path
+		}
+		fmt.Printf("::notice::WINDIAG walk path=%q absRoot=%q dir=%v name=%q rel=%q match=%v\n", path, absRoot, d.IsDir(), d.Name(), relSlash, glob.MatchAny([]string{"**/*"}, relSlash))
+		return nil
+	})
 	if err != nil {
-		t.Fatal(err)
+		fmt.Printf("::notice::WINDIAG walkerr=%v\n", err)
 	}
-	entries, cerr := w.Collect()
-	_ = cerr
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Path)
-	}
-	empties := w.Errors()
-	fmt.Printf("::notice::WINDIAG walker root=%q entries=%v walkerr=%v\n", root, names, empties)
-	t.Fatalf("WINDIAG entries=%v", names)
+	t.Fatalf("WINDIAG done")
 }
