@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +13,6 @@ import (
 )
 
 var ErrBinaryFile = errors.New("binary file")
-
-type EffectiveExcludesFunc func(root, output string, excludes []string, excludeSelf bool) []string
 
 func EffectiveExcludes(root, output string, excludes []string, excludeSelf bool) []string {
 	out := excludes
@@ -28,10 +27,8 @@ type sniffedFile struct {
 }
 
 type renderResult struct {
-	header string
-	footer string
-	bytes  int64
-	runes  int64
+	bytes int64
+	runes int64
 }
 
 type outputError struct {
@@ -41,17 +38,25 @@ type outputError struct {
 func (e *outputError) Error() string { return e.err.Error() }
 func (e *outputError) Unwrap() error { return e.err }
 
+// renderFile streams the file line by line. Passing complete lines (instead
+// of raw read blocks) to writeLine guarantees that chunk rotation happens at
+// line boundaries: rune-safe chunking, correct per-chunk rune accounting,
+// and sane semantics for split_long_lines (which now really means "split
+// oversized lines"). The final line is newline-terminated, so file content
+// in the output never runs into the next header/footer.
 func renderFile(f *os.File, writeLine func(string) error) (bytes int64, runes int64, err error) {
-	buf := make([]byte, 64*1024)
+	r := bufio.NewReaderSize(f, 64*1024)
 	for {
-		n, readErr := f.Read(buf)
-		if n > 0 {
-			line := string(buf[:n])
-			bytes += int64(n)
-			runes += int64(util.RuneCount(line))
-			if err := writeLine(line); err != nil {
+		line, readErr := r.ReadBytes('\n')
+		if len(line) > 0 {
+			if line[len(line)-1] != '\n' {
+				line = append(line, '\n')
+			}
+			runes += int64(util.RuneCount(string(line)))
+			if err := writeLine(string(line)); err != nil {
 				return 0, 0, &outputError{err: err}
 			}
+			bytes += int64(len(line))
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
@@ -125,11 +130,14 @@ func autoExcludeSelf(cfgPath string, excludes []string, excludeSelf bool) []stri
 	if err != nil {
 		return excludes
 	}
-	absExe, err := filepath.Abs(exe)
+	// Use symlink-resolving canonical paths for BOTH sides so the binary is
+	// still detected when the scan root or the executable path goes through
+	// a symlink (e.g. /tmp -> /private/tmp on macOS).
+	absExe, err := canonicalPath(exe)
 	if err != nil {
 		return excludes
 	}
-	absRoot, err := filepath.Abs(cfgPath)
+	absRoot, err := canonicalPath(cfgPath)
 	if err != nil {
 		return excludes
 	}

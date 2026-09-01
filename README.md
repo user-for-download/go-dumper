@@ -8,15 +8,16 @@ $ dumper --path ./myproject --output ./dump_out
 
 ## Features
 
-- **Glob-based filtering** — include/exclude files using doublestar patterns (`**/*.go`, `vendor/**`, etc.)
+- **Glob-based filtering** — include/exclude files using doublestar patterns (`**/*.go`, `vendor/**`, etc.). Invalid glob patterns fail with a clear error instead of silently matching nothing
+- **Pattern negation** — `!pattern` (on the CLI or inside a pattern file) flips a pattern between include and exclude
 - **Include priority** — explicit includes win over generic excludes (e.g., `include: ["deploy/.env.example"]` works even with `exclude: ["deploy/**"]`)
 - **Type filter** — filter files by extension (`--type go` only includes `.go` files)
 - **`@file` syntax** — load patterns from a file, one per line
-- **Rune-aware chunking** — respects Unicode codepoints (not bytes) for LLM context windows
-- **Raw file dump** — preserves file bytes without language or comment parsing
+- **Rune-aware, line-based chunking** — output is split at line boundaries and Unicode codepoints (not bytes) are counted, so every chunk is valid UTF-8 and sized correctly for LLM context windows
+- **Raw file dump** — preserves file bytes without language or comment parsing (a missing trailing newline is added so file content never runs into the next header/fence)
 - **Output formats** — `plain` text or `markdown`
-- **Project tree** — optionally prepend an ASCII tree of your project, either full (`--tree-mode full`) or filtered to match what was dumped (`--tree-mode include`)
-- **Auto-exclusions** — the output directory and the dumper binary itself are always excluded
+- **Project tree** — optionally prepend an ASCII tree of your project, either full (`--tree-mode full`, honors excludes) or filtered to match exactly what was dumped (`--tree-mode include`)
+- **Atomic-ish runs** — the output directory and the dumper binary itself are always excluded, and a failed run removes its partial chunk files
 - **Clean output** — optionally clean the output folder before writing (`--clean`)
 - **Concurrent reads** — optional parallelism for large projects
 - **Stats export** — JSON summary of processed/skipped files, timing, and chunk counts
@@ -135,7 +136,7 @@ JSON defaults → config file → CLI flags. Each level overrides the previous.
 | `--split-long-lines` | Split lines that exceed `max-symbols` |
 | `-c, --config` | Config file path (default: `prc.json`) |
 | `--tree` | Prepend project tree to output |
-| `--tree-mode full|include` | `full` = all files; `include` = only matched files |
+| `--tree-mode full\|include` | `full` = all files except excluded ones; `include` = only the files that were dumped |
 | `--tree-depth` | Max tree depth (0 = unlimited) |
 | `--format plain|markdown` | Output format |
 | `--concurrency N` | Parallel readers (default: 1) |
@@ -161,7 +162,7 @@ Any `--include` or `--exclude` value that starts with `@` is treated as a path t
 ./dumper --include "@patterns.txt"
 ```
 
-Lines starting with `#` and blank lines are ignored.
+Lines starting with `#` and blank lines are ignored. A pattern prefixed with `!` is negated: among includes it becomes an exclude, and among excludes it becomes an include.
 
 ## Output Format Examples
 

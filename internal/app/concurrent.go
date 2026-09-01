@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -65,7 +66,7 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 					r.processErr = ErrBinaryFile
 					f.Close()
 				} else {
-					rel := toRel(root, j.sf.path)
+					rel := ToRel(root, j.sf.path)
 
 					tmp, terr := os.CreateTemp(tempDir, "render-*")
 					if terr != nil {
@@ -177,12 +178,15 @@ func RunConcurrent(files []sniffedFile, root string, ch *chunker.Chunker, fmtr f
 	return nil
 }
 
+// copyPayload copies a rendered temp payload into the chunker line by line,
+// mirroring renderFile: complete lines keep chunk rotation at line
+// boundaries, so chunks stay rune-correct even in concurrent mode.
 func copyPayload(f *os.File, write func(string) error) error {
-	buf := make([]byte, 64*1024)
+	r := bufio.NewReaderSize(f, 64*1024)
 	for {
-		n, err := f.Read(buf)
-		if n > 0 {
-			if werr := write(string(buf[:n])); werr != nil {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			if werr := write(string(line)); werr != nil {
 				return werr
 			}
 		}

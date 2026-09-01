@@ -355,3 +355,70 @@ func TestWalker_PrunesExcludedDirectories(t *testing.T) {
 		t.Fatalf("excluded directory was traversed or included: %#v", entries)
 	}
 }
+
+func TestWalker_RejectsInvalidPattern(t *testing.T) {
+	root := t.TempDir()
+	_, err := New(Options{Root: root, Includes: []string{"[invalid"}})
+	if err == nil {
+		t.Fatal("invalid glob pattern must be rejected, not silently ignored")
+	}
+}
+
+func TestWalker_NegationInIncludes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.go"), "package a")
+	writeFile(t, filepath.Join(root, "vendor", "b.go"), "package b")
+
+	w, err := New(Options{
+		Root:     root,
+		Includes: []string{"**/*.go", "!**/vendor/**"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		rel, _ := filepath.Rel(root, e.Path)
+		names = append(names, filepath.ToSlash(rel))
+	}
+	if len(names) != 1 || names[0] != "a.go" {
+		t.Errorf("negated include should exclude vendor: got %v", names)
+	}
+}
+
+func TestWalker_ExplicitIncludeInsideHiddenDir(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".config", "credentials.env"), "KEY=1")
+	writeFile(t, filepath.Join(root, ".other", "junk.env"), "X=1")
+
+	w, err := New(Options{
+		Root:     root,
+		Includes: []string{".config/credentials.env"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := w.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || filepath.Base(entries[0].Path) != "credentials.env" {
+		t.Fatalf("explicit include of a hidden-dir file must work: %#v", entries)
+	}
+}
+
+func TestResolveNegations(t *testing.T) {
+	inc, exc := ResolveNegations(
+		[]string{"**/*.go", "!vendor/**", "!x.txt"},
+		[]string{"build/**", "!keep.txt"},
+	)
+	wantInc := []string{"**/*.go", "keep.txt"}
+	wantExc := []string{"vendor/**", "x.txt", "build/**"}
+	if !reflect.DeepEqual(inc, wantInc) || !reflect.DeepEqual(exc, wantExc) {
+		t.Errorf("got inc=%v exc=%v, want inc=%v exc=%v", inc, exc, wantInc, wantExc)
+	}
+}

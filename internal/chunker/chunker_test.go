@@ -352,3 +352,27 @@ func TestChunker_WriteBytesRejectsWrongRuneCount(t *testing.T) {
 		t.Fatal("expected rune count mismatch")
 	}
 }
+
+func TestChunker_AbandonRemovesCreatedFiles(t *testing.T) {
+	dir := t.TempDir()
+	c, err := New(Options{OutputDir: dir, Prefix: "dump", MaxSymbols: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WriteString("aaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WriteString("bbbbb"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Abandon(); err != nil {
+		t.Fatalf("Abandon: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Abandon must remove all created chunk files, got %v", entries)
+	}
+}

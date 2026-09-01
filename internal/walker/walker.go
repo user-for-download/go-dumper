@@ -2,6 +2,7 @@ package walker
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/user-for-download/go-dumper/internal/glob"
 )
 
 type Entry struct {
@@ -38,11 +41,18 @@ func New(opts Options) (*Walker, error) {
 	if err != nil {
 		return nil, err
 	}
+	inc, exc = ResolveNegations(inc, exc)
 	if len(inc) == 0 {
 		inc = []string{"**/*"}
 	}
 	opts.Includes = normalizePatterns(inc)
 	opts.Excludes = normalizePatterns(exc)
+	if err := glob.Validate(opts.Includes); err != nil {
+		return nil, err
+	}
+	if err := glob.Validate(opts.Excludes); err != nil {
+		return nil, err
+	}
 	return &Walker{opts: opts}, nil
 }
 
@@ -94,7 +104,7 @@ func (w *Walker) Collect() ([]Entry, error) {
 			if dirErr == nil {
 				dirRel = filepath.ToSlash(dirRel)
 				for _, exclude := range w.opts.Excludes {
-					if matchPattern(exclude, dirRel) || matchPattern(exclude, dirRel+"/") || matchPattern(exclude, dirRel+"/**") {
+					if glob.MatchPattern(exclude, dirRel) || glob.MatchPattern(exclude, dirRel+"/") || glob.MatchPattern(exclude, dirRel+"/**") {
 						return filepath.SkipDir
 					}
 				}
@@ -108,10 +118,10 @@ func (w *Walker) Collect() ([]Entry, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
-		if !w.matchAny(w.opts.Includes, rel) {
+		if !glob.MatchAny(w.opts.Includes, rel) {
 			return nil
 		}
-		if w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel) {
+		if glob.Excluded(w.opts.Includes, w.opts.Excludes, rel) {
 			return nil
 		}
 		if len(w.opts.Type) > 0 {
@@ -151,7 +161,11 @@ func (w *Walker) Collect() ([]Entry, error) {
 		if !filepath.IsAbs(pat) {
 			pat = filepath.Join(root, pat)
 		}
-		matches, _ := doublestar.FilepathGlob(pat)
+		matches, gerr := doublestar.FilepathGlob(pat)
+		if gerr != nil {
+			w.errors = append(w.errors, fmt.Errorf("glob %q: %w", pat, gerr))
+			continue
+		}
 		for _, match := range matches {
 			if info, err := os.Lstat(match); err != nil || info.Mode()&os.ModeSymlink != 0 {
 				continue
@@ -172,15 +186,17 @@ func (w *Walker) Collect() ([]Entry, error) {
 			// is an explicit (non-wildcard) reference like "@file.txt" that
 			// intentionally names a hidden file.
 			if !w.opts.IncludeHidden && strings.HasPrefix(info.Name(), ".") {
-				if hasWildcard(inc) {
+				if glob.HasWildcard(inc) {
 					continue
 				}
 			}
 
 			// Also skip files whose parent directory is hidden. The glob phase
 			// doesn't prune hidden directories like WalkDir does, so we need
-			// to check here to stay consistent.
-			if !w.opts.IncludeHidden && isInsideHiddenDir(match, root) {
+			// to check here to stay consistent. Explicit (non-wildcard)
+			// includes are exempt so that naming a hidden file directly —
+			// even inside a hidden directory — always works.
+			if !w.opts.IncludeHidden && glob.HasWildcard(inc) && isInsideHiddenDir(match, root) {
 				continue
 			}
 
@@ -194,11 +210,18 @@ func (w *Walker) Collect() ([]Entry, error) {
 			if filepath.IsAbs(inc) {
 				matchTarget = filepath.ToSlash(absMatch)
 			}
-			if !w.matchAny([]string{inc}, matchTarget) {
+			if !glob.MatchAny([]string{inc}, matchTarget) {
 				continue
 			}
-			excluded := w.matchIncludePriority(w.opts.Includes, w.opts.Excludes, rel)
-			if filepath.IsAbs(inc) && !hasWildcard(inc) {
+			excluded := glob.Excluded(w.opts.Includes, w.opts.Excludes, rel)
+			if matchTarget != rel {
+				// Absolute include: also honor exclude patterns (including
+				// absolute ones) against the real filesystem path.
+				if glob.MatchAny(w.opts.Excludes, matchTarget) && !glob.IncludeMoreSpecific(w.opts.Includes, w.opts.Excludes, matchTarget) {
+					excluded = true
+				}
+			}
+			if filepath.IsAbs(inc) && !glob.HasWildcard(inc) {
 				excluded = false
 			}
 			if excluded {
@@ -234,74 +257,6 @@ func (w *Walker) Errors() []error {
 	return w.errors
 }
 
-// matchPattern checks whether pattern matches rel. For wildcard patterns it
-// uses doublestar.PathMatchUnvalidated. For plain (non-wildcard) patterns it
-// also matches as a directory prefix — e.g. pattern "cmd" matches "cmd/main.go".
-func matchPattern(pattern, rel string) bool {
-	if doublestar.PathMatchUnvalidated(pattern, rel) {
-		return true
-	}
-	if !hasWildcard(pattern) {
-		dirPrefix := strings.TrimSuffix(pattern, "/") + "/"
-		return strings.HasPrefix(rel, dirPrefix)
-	}
-	return false
-}
-
-func (w *Walker) matchAny(patterns []string, rel string) bool {
-	for _, p := range patterns {
-		if p == "" {
-			continue
-		}
-		if matchPattern(p, rel) {
-			return true
-		}
-	}
-	return false
-}
-
-func (w *Walker) matchIncludePriority(includes, excludes []string, rel string) bool {
-	matchedInclude := w.matchAny(includes, rel)
-	matchedExclude := w.matchAny(excludes, rel)
-
-	if !matchedInclude {
-		return matchedExclude
-	}
-
-	if !matchedExclude {
-		return false
-	}
-
-	return !w.anyIncludeMoreSpecificThanExclude(includes, excludes, rel)
-}
-
-func (w *Walker) anyIncludeMoreSpecificThanExclude(includes, excludes []string, rel string) bool {
-	for _, inc := range includes {
-		if inc == "" {
-			continue
-		}
-		if !matchPattern(inc, rel) {
-			continue
-		}
-		// Exact file match (no wildcards, PathMatch succeeded) always wins.
-		if !hasWildcard(inc) && doublestar.PathMatchUnvalidated(inc, rel) {
-			return true
-		}
-		for _, exc := range excludes {
-			if exc == "" {
-				continue
-			}
-			if !matchPattern(exc, rel) {
-				continue
-			}
-			if patternSpecificity(inc) > patternSpecificity(exc) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // isInsideHiddenDir reports whether path contains a hidden directory component
 // (a segment starting with '.') between root and the file itself.
 func isInsideHiddenDir(path, root string) bool {
@@ -315,18 +270,4 @@ func isInsideHiddenDir(path, root string) bool {
 		}
 	}
 	return false
-}
-
-func hasWildcard(p string) bool {
-	return strings.ContainsAny(p, "*?")
-}
-
-func patternSpecificity(p string) int {
-	literals := 0
-	for _, c := range p {
-		if c != '*' && c != '?' {
-			literals++
-		}
-	}
-	return literals
 }

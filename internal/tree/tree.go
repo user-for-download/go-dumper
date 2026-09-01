@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
+	"github.com/user-for-download/go-dumper/internal/glob"
 )
 
 type Mode string
@@ -52,6 +52,12 @@ func Generate(opts Options) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("root is not a directory: %s", opts.Root)
 	}
+	if err := glob.Validate(opts.Includes); err != nil {
+		return "", err
+	}
+	if err := glob.Validate(opts.Excludes); err != nil {
+		return "", err
+	}
 
 	var allowed map[string]struct{}
 	if opts.mode() == ModeInclude {
@@ -77,12 +83,27 @@ func Generate(opts Options) (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(filepath.Base(opts.Root))
+	sb.WriteString(rootDisplayName(opts.Root))
 	sb.WriteString("/\n")
 	if err := writeChildren(&sb, opts.Root, "", 1, opts, allowed); err != nil {
 		return "", err
 	}
 	return sb.String(), nil
+}
+
+// rootDisplayName returns a sensible label for the tree root. filepath.Base
+// of "." is ".", which would render the tree header as "./"; resolve to the
+// real directory name in that case.
+func rootDisplayName(root string) string {
+	name := filepath.Base(root)
+	if name == "." || name == string(filepath.Separator) || name == "/" || name == "" {
+		if abs, err := filepath.Abs(root); err == nil {
+			if base := filepath.Base(abs); base != "/" && base != "." && base != "" {
+				return base
+			}
+		}
+	}
+	return name
 }
 
 func collectAllowed(opts Options) (map[string]struct{}, error) {
@@ -114,13 +135,13 @@ func collectAllowed(opts Options) (map[string]struct{}, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
-		matchedInclude := matchAny(opts.Includes, rel)
-		matchedExclude := matchAny(opts.Excludes, rel)
+		matchedInclude := glob.MatchAny(opts.Includes, rel)
+		matchedExclude := glob.MatchAny(opts.Excludes, rel)
 
 		if !matchedInclude {
 			return nil
 		}
-		if matchedExclude && !anyIncludeMoreSpecific(opts.Includes, opts.Excludes, rel) {
+		if matchedExclude && !glob.IncludeMoreSpecific(opts.Includes, opts.Excludes, rel) {
 			return nil
 		}
 		if len(opts.Type) > 0 {
@@ -156,32 +177,6 @@ func hasAllowedDescendant(allowed map[string]struct{}, dirRel string) bool {
 	return false
 }
 
-// matchPattern checks whether pattern matches rel. For wildcard patterns it
-// uses doublestar.PathMatchUnvalidated. For plain (non-wildcard) patterns it
-// also matches as a directory prefix — e.g. pattern "cmd" matches "cmd/main.go".
-func matchPattern(pattern, rel string) bool {
-	if doublestar.PathMatchUnvalidated(pattern, rel) {
-		return true
-	}
-	if !hasWildcard(pattern) {
-		dirPrefix := strings.TrimSuffix(pattern, "/") + "/"
-		return strings.HasPrefix(rel, dirPrefix)
-	}
-	return false
-}
-
-func matchAny(patterns []string, rel string) bool {
-	for _, p := range patterns {
-		if p == "" {
-			continue
-		}
-		if matchPattern(p, rel) {
-			return true
-		}
-	}
-	return false
-}
-
 func writeChildren(sb *strings.Builder, dir, prefix string, depth int, opts Options, allowed map[string]struct{}) error {
 	if opts.MaxDepth > 0 && depth > opts.MaxDepth {
 		return nil
@@ -203,11 +198,23 @@ func writeChildren(sb *strings.Builder, dir, prefix string, depth int, opts Opti
 		if !opts.IncludeHidden && strings.HasPrefix(name, ".") {
 			continue
 		}
-		if allowed != nil {
-			childRel := name
-			if dirRel != "" {
-				childRel = dirRel + "/" + name
+		childRel := name
+		if dirRel != "" {
+			childRel = dirRel + "/" + name
+		}
+		if opts.mode() == ModeFull {
+			// Full mode shows every file, but still honors excludes (vendor/,
+			// build dirs, the auto-excluded output directory, ...) so the tree
+			// never advertises files that will never be dumped.
+			if e.IsDir() {
+				if glob.MatchAny(opts.Excludes, childRel) || glob.MatchAny(opts.Excludes, childRel+"/**") {
+					continue
+				}
+			} else if glob.MatchAny(opts.Excludes, childRel) {
+				continue
 			}
+		}
+		if allowed != nil {
 			if e.IsDir() {
 				if !hasAllowedDescendant(allowed, childRel) {
 					continue
@@ -254,47 +261,6 @@ func writeChildren(sb *strings.Builder, dir, prefix string, depth int, opts Opti
 		sb.WriteString(line + "\n")
 	}
 	return nil
-}
-
-func anyIncludeMoreSpecific(includes, excludes []string, rel string) bool {
-	for _, inc := range includes {
-		if inc == "" {
-			continue
-		}
-		if !matchPattern(inc, rel) {
-			continue
-		}
-		// Exact file match (no wildcards, PathMatch succeeded) always wins.
-		if !hasWildcard(inc) && doublestar.PathMatchUnvalidated(inc, rel) {
-			return true
-		}
-		for _, exc := range excludes {
-			if exc == "" {
-				continue
-			}
-			if !matchPattern(exc, rel) {
-				continue
-			}
-			if patternSpecificity(inc) > patternSpecificity(exc) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasWildcard(p string) bool {
-	return strings.ContainsAny(p, "*?")
-}
-
-func patternSpecificity(p string) int {
-	literals := 0
-	for _, c := range p {
-		if c != '*' && c != '?' {
-			literals++
-		}
-	}
-	return literals
 }
 
 func humanSize(n int64) string {

@@ -307,3 +307,43 @@ func TestGenerate_ModeInclude_WithAllowedFiles(t *testing.T) {
 		t.Errorf("vendor/ should not appear (not in AllowedFiles), got:\n%s", out)
 	}
 }
+
+// Regression: with Root "." (the default) the tree header used to render as
+// "./" instead of the project directory name.
+func TestRootDisplayName(t *testing.T) {
+	tmp := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootDisplayName("."); got != filepath.Base(tmp) {
+		t.Errorf("rootDisplayName dot = %q, want %q", got, filepath.Base(tmp))
+	}
+	if got := rootDisplayName(filepath.Join(tmp, "sub")); got != "sub" {
+		t.Errorf("rootDisplayName(sub) = %q, want sub", got)
+	}
+}
+
+// Regression: full-mode tree now honors excludes so it never advertises
+// files that will never be dumped.
+func TestGenerate_ModeFull_RespectsExcludes(t *testing.T) {
+	root := setupFilteredTree(t)
+	out, err := Generate(Options{
+		Root:     root,
+		Mode:     ModeFull,
+		Excludes: []string{"vendor/**"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "vendor/") || strings.Contains(out, "vendor.go") {
+		t.Errorf("full mode must honor excludes, got:\n%s", out)
+	}
+	if !strings.Contains(out, "go.mod") {
+		t.Errorf("non-excluded files must still appear, got:\n%s", out)
+	}
+}

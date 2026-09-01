@@ -134,6 +134,7 @@ func main() {
 				if err != nil {
 					return fmt.Errorf("exclude patterns: %w", err)
 				}
+				includes, excludes = walker.ResolveNegations(includes, excludes)
 				w, err := walker.New(walker.Options{
 					Root:          cfg.Path,
 					Includes:      includes,
@@ -149,7 +150,7 @@ func main() {
 					return err
 				}
 				for _, e := range entries {
-					fmt.Println(e.Path)
+					fmt.Println(app.ToRel(cfg.Path, e.Path))
 				}
 				return nil
 			}

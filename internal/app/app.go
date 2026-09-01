@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/user-for-download/go-dumper/internal/chunker"
 	"github.com/user-for-download/go-dumper/internal/config"
@@ -16,7 +17,9 @@ import (
 	"github.com/user-for-download/go-dumper/internal/walker"
 )
 
-func toRel(root, path string) string {
+// ToRel renders path relative to root (slash-separated). Files outside the
+// root fall back to their original path.
+func ToRel(root, path string) string {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		absRoot = root
@@ -62,6 +65,10 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 		return st, fmt.Errorf("exclude patterns: %w", err)
 	}
 
+	// Resolve "!pattern" negations once so the walker and the tree generator
+	// see identical effective include/exclude lists.
+	includes, excludes = walker.ResolveNegations(includes, excludes)
+
 	w, err := walker.New(walker.Options{
 		Root:          cfg.Path,
 		Includes:      includes,
@@ -82,9 +89,62 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 
 	st.SetTotalFiles(len(entries))
 
-	files := make([]sniffedFile, len(entries))
-	for i, e := range entries {
-		files[i] = sniffedFile{path: e.Path, size: e.Size}
+	// Sniff binary files up front: skipped files never reach the processing
+	// queue or the include-mode tree, so the tree mirrors exactly what will
+	// be dumped and the progress bar tracks only real work.
+	files := make([]sniffedFile, 0, len(entries))
+	for _, e := range entries {
+		isBin, serr := util.SniffBinary(e.Path)
+		if serr != nil {
+			st.AddSkipped(e.Path, stats.ReasonError, serr)
+			continue
+		}
+		if isBin {
+			st.AddSkipped(e.Path, stats.ReasonBinary, nil)
+			continue
+		}
+		files = append(files, sniffedFile{path: e.Path, size: e.Size})
+	}
+
+	// Validate the stats file target before anything is written: a stats file
+	// that would overwrite one of the chunk files (dump_00001.txt, ...) is a
+	// configuration error and must fail early, not after the dump completes.
+	if cfg.StatsFile != "" && statsFileCollidesWithChunk(cfg) {
+		return st, errors.New("stats_file must not overwrite a chunk file")
+	}
+
+	// Generate the tree before the output directory or any chunk file exists,
+	// so the tree can never list the dump output itself.
+	var treeStr string
+	if cfg.Tree.Enabled {
+		treeMode := tree.ModeFull
+		if cfg.Tree.Mode == "include" {
+			treeMode = tree.ModeInclude
+		}
+		treeOpts := tree.Options{
+			Root:            cfg.Path,
+			MaxDepth:        cfg.Tree.MaxDepth,
+			IncludeSizes:    cfg.Tree.IncludeSizes,
+			IncludeHidden:   cfg.IncludeHidden,
+			Mode:            treeMode,
+			Includes:        includes,
+			Excludes:        excludes,
+			Type:            cfg.Type,
+			AllowedFilesSet: treeMode == tree.ModeInclude,
+		}
+		if treeMode == tree.ModeInclude {
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.path
+			}
+			treeOpts.AllowedFiles = paths
+		}
+		ts, terr := tree.Generate(treeOpts)
+		if terr != nil {
+			st.AddError("tree: " + terr.Error())
+		} else {
+			treeStr = ts
+		}
 	}
 
 	if err := os.MkdirAll(cfg.Output, 0o755); err != nil {
@@ -112,44 +172,27 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	if err != nil {
 		return st, err
 	}
-	defer ch.Close()
+
+	// On any failure the partial chunk files are removed: a failed run must
+	// not leave an incomplete dump behind that looks like a complete one.
+	dumpComplete := false
+	defer func() {
+		if !dumpComplete {
+			if aerr := ch.Abandon(); aerr != nil {
+				st.AddError("cleanup chunks: " + aerr.Error())
+			}
+		}
+	}()
+
 	if pre := fmtr.Preamble(); pre != "" {
 		if err := ch.WriteString(pre); err != nil {
 			return st, err
 		}
 	}
 
-	if cfg.Tree.Enabled {
-		treeMode := tree.ModeFull
-		if cfg.Tree.Mode == "include" {
-			treeMode = tree.ModeInclude
-		}
-		treeOpts := tree.Options{
-			Root:            cfg.Path,
-			MaxDepth:        cfg.Tree.MaxDepth,
-			IncludeSizes:    cfg.Tree.IncludeSizes,
-			IncludeHidden:   cfg.IncludeHidden,
-			Mode:            treeMode,
-			Includes:        includes,
-			Excludes:        excludes,
-			Type:            cfg.Type,
-			AllowedFilesSet: treeMode == tree.ModeInclude,
-		}
-		if treeMode == tree.ModeInclude {
-			paths := make([]string, len(files))
-			for i, f := range files {
-				paths[i] = f.path
-			}
-			treeOpts.AllowedFiles = paths
-		}
-		treeStr, terr := tree.Generate(treeOpts)
-		if terr != nil {
-			st.AddError("tree: " + terr.Error())
-		}
-		if treeStr != "" {
-			if err := ch.WriteString(fmtr.TreeBlock(treeStr)); err != nil {
-				return st, err
-			}
+	if treeStr != "" {
+		if err := ch.WriteString(fmtr.TreeBlock(treeStr)); err != nil {
+			return st, err
 		}
 	}
 
@@ -184,16 +227,11 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	if err := ch.Close(); err != nil {
 		return st, fmt.Errorf("close chunks: %w", err)
 	}
+	dumpComplete = true
 
 	st.Finish(ch.ChunkCount())
 	finished = true
 	if cfg.StatsFile != "" {
-		for i := 1; i <= ch.ChunkCount(); i++ {
-			chunkPath := filepath.Join(cfg.Output, fmt.Sprintf("%s_%05d%s", cfg.ChunkPrefix, i, ext))
-			if sameFilePath(cfg.StatsFile, chunkPath) {
-				return st, errors.New("stats_file must not overwrite a chunk file")
-			}
-		}
 		if err := st.WriteJSON(cfg.StatsFile); err != nil {
 			return st, fmt.Errorf("stats: %w", err)
 		}
@@ -201,10 +239,39 @@ func Run(cfg *config.Config) (*stats.Stats, error) {
 	return st, nil
 }
 
-func sameFilePath(a, b string) bool {
-	absA, errA := canonicalPath(a)
-	absB, errB := canonicalPath(b)
-	return errA == nil && errB == nil && filepath.Clean(absA) == filepath.Clean(absB)
+// statsFileCollidesWithChunk reports whether cfg.StatsFile names a file the
+// chunker would create (e.g. <output>/dump_00001.txt).
+func statsFileCollidesWithChunk(cfg *config.Config) bool {
+	absStats, err := canonicalPath(cfg.StatsFile)
+	if err != nil {
+		return false
+	}
+	absOut, err := canonicalPath(cfg.Output)
+	if err != nil {
+		return false
+	}
+	if filepath.Dir(absStats) != filepath.Clean(absOut) {
+		return false
+	}
+	ext := ".txt"
+	if cfg.Format == "markdown" {
+		ext = ".md"
+	}
+	name := filepath.Base(absStats)
+	prefix := cfg.ChunkPrefix + "_"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ext) {
+		return false
+	}
+	mid := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ext)
+	if mid == "" {
+		return false
+	}
+	for _, r := range mid {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, fmtr format.Formatter, st *stats.Stats) error {
@@ -217,7 +284,7 @@ func ProcessFile(sf sniffedFile, root string, ch *chunker.Chunker, fmtr format.F
 		return ErrBinaryFile
 	}
 
-	rel := toRel(root, sf.path)
+	rel := ToRel(root, sf.path)
 
 	if err := ch.WriteString(fmtr.FileHeader(rel)); err != nil {
 		return &outputError{err: err}

@@ -2,12 +2,41 @@
 
 This document describes the internal structure of `dumper`.
 
+## Data Flow
+
+```
+CLI (main.go)
+  └─> config.Load() + MergeCLI() + Validate()
+       └─> app.Run(cfg)
+            ├─> walker.ExpandPatterns()  — @file expansion
+            ├─> walker.ResolveNegations() — "!pattern" include/exclude flipping
+            ├─> EffectiveExcludes()      — output dir + dumper binary auto-excludes
+            │
+            ├─> walker.New() + Collect() — filesystem traversal, pattern validation
+            │
+            ├─> binary detection (util.SniffBinary, pre-pass)
+            │   └─> binary/read-error files → stats; never reach the pipeline
+            │
+            ├─> tree.Generate()          — generated BEFORE the output dir or any
+            │   │                          chunk file exists, so it never lists them
+            │   └─> include mode uses only the (text) files that will be dumped
+            │
+            ├─> chunker.New()            — partial output is abandoned (deleted)
+            │                              if the run fails
+            ├─> for each text file:
+            │   ├─> renderFile()         — streams complete lines
+            │   └─> chunker.WriteString  — rotates chunks at line boundaries
+            │
+            └─> stats.WriteJSON()        — optional stats export (validated early)
+```
+
 ## Package Overview
 
 ```
 cmd/dumper/            CLI entry point
 internal/app/          Orchestration: pipeline wiring
-internal/config/        Config loading, defaults, CLI overrides, validation
+internal/config/       Config loading, defaults, CLI overrides, validation
+internal/glob/         Shared doublestar matching, priority, validation
 internal/walker/       Filesystem traversal with glob filtering
 internal/chunker/      Rune-aware output file splitting
 internal/format/       Output formatters (plain, markdown)
@@ -17,42 +46,17 @@ internal/stats/        Thread-safe counters + JSON export
 internal/progress/     mpb-based progress bar
 ```
 
-## Data Flow
-
-```
-CLI (main.go)
-  └─> config.Load() + MergeCLI() + Validate()
-       └─> app.Run(cfg)
-            ├─> walker.Collect()     — filesystem traversal
-            │   ├─> walker.ExpandPatterns() — @file expansion
-            │   ├─> autoExcludeOutput()   — exclude output dir
-            │   └─> autoExcludeSelf()      — exclude dumper binary
-            │
-            ├─> binary detection (util.SniffBinary)
-            │   └─> skip binary files → stats
-            │
-            ├─> format.New()        — select output formatter
-            │
-            ├─> tree.Generate()     — optional project tree
-            │   └─> uses same includes/excludes for ModeInclude filtering
-            │
-            ├─> for each text file:
-            │   ├─> renderFile()     — raw file content
-            │   └─> chunker.WriteString/WriteBytes — split into chunks
-            │
-            └─> stats.WriteJSON()  — optional stats export
-```
-
 ## Key Design Decisions
 
-### Rune-Correct Chunking
+### Line-Based, Rune-Correct Chunking
 
-`MaxSymbols` counts Unicode codepoints (runes), not bytes. This is correct for LLM context windows which count tokens by characters/codepoints. The chunker converts to `[]rune` before slicing:
-
-```go
-runes := []rune(s)
-piece := string(runes[i:end])
-```
+`renderFile` streams files line by line, and `MaxSymbols` counts Unicode
+codepoints (runes), not bytes. Because the chunker only ever rotates chunks
+at line boundaries, every chunk is valid UTF-8 and its rune count is exact.
+An oversized single line is split on rune boundaries when
+`split_long_lines` is enabled, and rejected with a clear error when it is
+not. A missing trailing newline at EOF is added so file content never runs
+into the next file header or markdown fence.
 
 ### Output Order Preservation in Concurrent Mode
 
@@ -85,7 +89,7 @@ This is used in both `ProcessFile` (serial) and `RunConcurrent` (parallel) to en
 The walker's `Collect()` has two phases:
 
 1. **WalkDir phase** — respects `IncludeHidden` flag; skips dotfiles/dirs when false
-2. **Glob phase** — explicitly named hidden files (e.g., `/path/to/.env`) are allowed regardless of `IncludeHidden`, so an explicit `--include` of a hidden file always works
+2. **Glob phase** — explicitly named hidden files (e.g., `/path/to/.env`, even inside a hidden directory) are allowed regardless of `IncludeHidden`, so an explicit `--include` of a hidden file always works. Wildcard patterns still respect the `IncludeHidden` flag.
 
 ### Auto-Exclusions
 
@@ -148,7 +152,15 @@ When `tree.mode: "include"`, the tree generation uses the same include/exclude p
 
 ### Stats Handling
 
-Stats are initialized with `stats.New()` at the start of `app.Run()`. A deferred function ensures `st.Finish(0)` is called on any early error path, preventing garbage values from `DurationSec()`. On successful completion, `st.Finish(ch.ChunkCount())` is called with a boolean flag to prevent the defer from overwriting the duration.
+Stats are initialized with `stats.New()` at the start of `app.Run()`. A deferred function ensures `st.Finish(0)` is called on any early error path, preventing garbage values from `DurationSec()`. On successful completion, `st.Finish(ch.ChunkCount())` is called with a boolean flag to prevent the defer from overwriting the duration. A `stats_file` that would overwrite one of the chunk files (e.g. `dump_00001.txt`) is rejected before any output is written.
+
+### Failure Cleanup
+
+If a run fails after the chunker was created (write errors, oversized content with splitting disabled, close errors), `chunker.Abandon()` removes every chunk file the run created, so a broken dump is never left on disk looking like a complete one.
+
+### Tree Full Mode
+
+`tree.mode: "full"` shows every file in the project **except excluded ones** — configured excludes plus the auto-excluded output directory and dumper binary are always honored, so the tree never advertises files that will never be dumped. The tree is also generated before the output directory or any chunk file exists.
 
 ### Progress Bar Handling
 
@@ -171,8 +183,9 @@ In concurrent mode, when a write error occurs, the worker pool is cancelled. The
 
 ## Testing Strategy
 
-- **Unit tests** for: chunker (rune counting, rotation, splitting), walker (glob matching and directory pruning), tree (ModeFull/ModeInclude), config (validation)
+- **Unit tests** for: chunker (rune counting, rotation, splitting, abandon), walker (glob matching and directory pruning, invalid patterns, negation, hidden dirs), tree (ModeFull/ModeInclude, root naming, excludes), glob (validation, include priority), config (validation)
 - **E2E tests** (`app_e2e_test.go`): full pipeline including reassembly fidelity (chunked output joined must equal canonical single-chunk output), binary skipping, concurrency ordering, tree content, output directory auto-exclusion
+- **Regression tests** cover the harder failure modes: multi-block files with small `max_symbols`, multi-byte files spanning chunk boundaries (all chunks must be valid UTF-8, serial and concurrent), markdown fence termination, failed-run cleanup, stats-file collisions
 - Re-assembly invariant: two runs with `MaxSymbols=50` (split) and `MaxSymbols=1_000_000` (canonical) must produce byte-identical joined output
 
 ## Known Limitations

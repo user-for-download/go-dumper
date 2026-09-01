@@ -27,6 +27,7 @@ type Chunker struct {
 	bw         *bufio.Writer
 	chunkIdx   int
 	curSymbols int
+	created    []string
 }
 
 func New(opts Options) (*Chunker, error) {
@@ -79,6 +80,7 @@ func (c *Chunker) openNew() error {
 	c.bw = bufio.NewWriterSize(f, 64*1024)
 	c.chunkIdx = nextIdx
 	c.curSymbols = 0
+	c.created = append(c.created, path)
 	return nil
 }
 
@@ -182,5 +184,28 @@ func (c *Chunker) Close() error {
 		}
 		c.current = nil
 	}
+	return firstErr
+}
+
+// Abandon discards the chunked output: it closes the current file (without
+// flushing) and removes every chunk file this Chunker created. It is used to
+// clean up partial output after a failed run so a broken dump is never left
+// on disk looking like a complete one.
+func (c *Chunker) Abandon() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.bw = nil
+	if c.current != nil {
+		_ = c.current.Close()
+		c.current = nil
+	}
+	var firstErr error
+	for _, path := range c.created {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+			firstErr = fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	c.created = nil
 	return firstErr
 }
