@@ -5,6 +5,7 @@ package glob
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -21,7 +22,17 @@ func HasWildcard(p string) bool {
 // uses doublestar.PathMatchUnvalidated. For plain (non-wildcard) patterns it
 // also matches as a directory prefix — e.g. pattern "cmd" matches "cmd/main.go".
 func MatchPattern(pattern, rel string) bool {
-	if doublestar.PathMatchUnvalidated(pattern, rel) {
+	// doublestar only treats "**" as a real globstar when it is followed by the
+	// platform separator ("/" on Unix, "\\" on Windows). Our patterns and rels
+	// are always slash-normalized, so on Windows we convert both sides to
+	// backslash form before asking doublestar to match, otherwise "**" degrades
+	// to a plain "*" ("bash-like") and globstar patterns silently stop matching.
+	p, n := pattern, rel
+	if filepath.Separator == '\\' {
+		p = strings.ReplaceAll(p, "/", "\\")
+		n = strings.ReplaceAll(n, "/", "\\")
+	}
+	if doublestar.PathMatchUnvalidated(p, n) {
 		return true
 	}
 	if !HasWildcard(pattern) {
