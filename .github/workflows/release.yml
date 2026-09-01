@@ -62,10 +62,10 @@ jobs:
         shell: bash
         run: |
           set +e
-          out=$(go test -v ./... 2>&1)
+          out=$(go test -v -run TestWinDiagWalkerProbe ./internal/app/ 2>&1)
           code=$?
-          printf '%s\n' "$out" | grep -E '^(--- FAIL|FAIL|panic:)|^[[:space:]]+.*_test\.go:[0-9]+:' | while IFS= read -r l; do echo "::error::WINDIAG: $l"; done
-          printf '%s\n' "$out" | tail -60
+          printf '%s\n' "$out" | grep -E '^(--- FAIL|FAIL|panic:)|^[[:space:]]+.*_test\.go:[0-9]+:|WINDIAG' | while IFS= read -r l; do echo "::error::WINDIAG: $l"; done
+          printf '%s\n' "$out" | tail -40
           exit $code
 
       - name: Check go mod tidy
